@@ -1,0 +1,7 @@
+syntax: glob
+.git/
+*~
+*.orig
+__pycache__/
+.mypy_cache/
+.ruff_cache/

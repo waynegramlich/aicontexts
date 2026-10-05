@@ -1,2 +1,5 @@
 # Emacs back up files.
 *~
+
+# Claude's Mercurial checkpoints.
+.hg/
