@@ -1,6 +1,8 @@
-@7_Review_README.md_together/Details.md
-@8_Explore_moving_items_between_collections/Details.md
-@9_Hide_closed_items_and_check_on_startup/Summary.md
+@7_Explore_Having_a_Rules_Collection/Details.md
+@7_Explore_Having_a_Rules_Collection/Context.md
+@8_Review_README.md_together/Details.md
+@9_Explore_moving_items_between_collections/Details.md
+@10_Hide_closed_items_and_check_on_startup/Summary.md
 @2_Cleanup/Summary.md
 @3_Support_Multiple_Item_Collections/Summary.md
 @4_Add_support_for_Issues/Summary.md
