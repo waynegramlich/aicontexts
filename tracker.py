@@ -10,12 +10,22 @@ import string
 import sys
 import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-HELP: str = """Usage: tracker COMMAND [ARGUMENTS...]
+HELP: str = """Usage: tracker COLLECTION COMMAND [ARGUMENTS...]
+       tracker NAME create     Create the collection directory NAME
+       tracker --test          Run the self tests in a temporary directory
+       tracker [-h | --help]   Print this help message
+
+A COLLECTION is a directory containing a `.tracker.json` file.  They are
+found in the current directory, or else the nearest parent directory that
+has any.  COLLECTION and COMMAND may be shortened to any unique prefix, in
+any case (e.g. `tracker t cl 2` closes item 2 in TASKS).  A new collection
+is created, after asking, next to the existing ones (or else in the
+current directory) and is named exactly as typed.
 
 Commands:
   create NUMBER TITLE...  Create an item (NUMBER is like 1.2.3)
@@ -28,7 +38,6 @@ Commands:
   reference [-r] NUMBER   Set the item state to Reference
   suspend [-r] NUMBER     Set the item state to Suspended
   close [-r] NUMBER       Set the item state to Closed
-  test                    Run the self tests in a temporary directory
   help                    Print this help message
 
 Options:
@@ -51,6 +60,27 @@ ITEM_FILE: str = ".item.json"
 
 # The hidden file that held the state of an item in the old format.
 OLD_STATUS_FILE: str = ".status"
+
+# The hidden JSON file that marks a directory as a collection of items.
+COLLECTION_FILE: str = ".tracker.json"
+
+# The collection that holds `Startup.md` for all of the collections.
+STARTUP_COLLECTION: str = "TASKS"
+
+# The commands, and the command that each one runs.
+COMMANDS: dict[str, str] = {
+    "create": "create",
+    "rename": "rename",
+    "delete": "delete",
+    "list": "list",
+    "ls": "list",
+    "pending": "pending",
+    "open": "open",
+    "reference": "reference",
+    "suspend": "suspend",
+    "close": "close",
+    "help": "help",
+}
 
 # A test check: called with a condition that should be true and a description.
 Check = Callable[[bool, str], None]
@@ -157,6 +187,40 @@ def update_item(item_directory: Path, state: str = "") -> str:
     return stamp
 
 
+def matches(word: str, names: Iterable[str]) -> list[str]:
+    """Return the `names` that `word` abbreviates, ignoring case.
+
+    A name equal to `word` (ignoring case) is the only match.  Otherwise
+    every name that starts with `word` matches.
+    """
+    folded: str = word.casefold()
+    exact: list[str] = [name for name in names if name.casefold() == folded]
+    if exact:
+        return exact
+    return [name for name in names if name.casefold().startswith(folded)]
+
+
+def find_collections(start: Path) -> list[Path]:
+    """Return the collection directories nearest to `start`, sorted.
+
+    `start` and then each of its parents is searched for sub-directories
+    that contain a `.tracker.json` file.  The ones in the first directory
+    that has any are returned, or an empty list if none are found.
+    """
+    for directory in (start, *start.parents):
+        try:
+            found: list[Path] = sorted(
+                path
+                for path in directory.iterdir()
+                if (path / COLLECTION_FILE).is_file()
+            )
+        except OSError:
+            continue
+        if found:
+            return found
+    return []
+
+
 def parse_number(number: str) -> tuple[int, ...] | str:
     """Convert a number like "1.2.3" into a name like (1, 2, 3).
 
@@ -214,7 +278,7 @@ def parse_recursive(
         else:
             numbers.append(argument)
     if len(numbers) != 1:
-        return f"Usage: tracker {command} [-r] NUMBER"
+        return f"Usage: tracker COLLECTION {command} [-r] NUMBER"
     name: tuple[int, ...] | str = parse_number(numbers[0])
     if isinstance(name, str):
         return name
@@ -266,29 +330,31 @@ class Item:
 class Items:
     """A collection of items."""
 
-    def __init__(self, items_directory: Path = Path("TASKS")) -> None:
-        """Initialize an Items collection.
+    def __init__(self, items_directory: Path) -> None:
+        """Initialize the collection of items in `items_directory`.
 
-        Creates `items_directory` (by default "TASKS" in the current
-        directory) if it is not already present.  If the directory can
-        not be created or is not writable, an error is printed to stderr
-        and `self.error` is set to a non-empty error string.
+        Creates `items_directory` and its `.tracker.json` file if they are
+        not already present.  If the directory can not be created or is
+        not writable, an error is printed to stderr and `self.error` is
+        set to a non-empty error string.
         """
         self.items_directory: Path = items_directory
         self.items: dict[tuple[int, ...], Item] = {}
         self.directories: dict[tuple[int, ...], Path] = {}
         self.error: str = ""
+        collection_path: Path = items_directory / COLLECTION_FILE
         try:
             items_directory.mkdir(exist_ok=True)
-        except OSError as error:
-            self.error = (
-                f"Unable to create directory '{items_directory}': {error}"
-            )
-        else:
             if not os.access(items_directory, os.W_OK):
                 self.error = (
                     f"No write access to directory '{items_directory}'"
                 )
+            elif not collection_path.exists():
+                write_file(collection_path, "{}\n")
+        except OSError as error:
+            self.error = (
+                f"Unable to create directory '{items_directory}': {error}"
+            )
         if self.error:
             print(self.error, file=sys.stderr)
         else:
@@ -488,37 +554,13 @@ class Items:
             item.state = state
         return changed
 
-    def write_startup(self) -> str:
-        """Write `Startup.md` into the items directory.
-
-        Every line is an `@` import: the `Details.md` of every item, and
-        the `Context.md` of every Open or Reference item, so that adding
-        `@TASKS/Startup.md` to `CLAUDE.md` loads them.
-        Returns an empty string on success, or an error string on failure.
-        """
-        lines: list[str] = []
-        for item in self.list_items():
-            item_directory: Path = self.directories[item.name]
-            file_names: tuple[str, ...] = ("Details.md",)
-            if item.state in CONTEXT_STATES:
-                file_names += ("Context.md",)
-            for file_name in file_names:
-                if (item_directory / file_name).is_file():
-                    lines.append(f"@{item_directory.name}/{file_name}")
-        startup_path: Path = self.items_directory / "Startup.md"
-        try:
-            write_file(startup_path, "".join(f"{line}\n" for line in lines))
-        except OSError as error:
-            return f"Unable to write '{startup_path}': {error}"
-        return ""
-
     def create_command(self, arguments: list[str]) -> str:
         """Run `create NUMBER TITLE...`.
 
         Returns an empty string on success, or an error string on failure.
         """
         if len(arguments) < 2:
-            return "Usage: tracker create NUMBER TITLE..."
+            return "Usage: tracker COLLECTION create NUMBER TITLE..."
         result: Item | str = self.create_item(
             arguments[0], " ".join(arguments[1:])
         )
@@ -537,7 +579,7 @@ class Items:
             else:
                 numbers.append(argument)
         if len(numbers) > 1:
-            return "Usage: tracker list [-l] [NUMBER]"
+            return "Usage: tracker COLLECTION list [-l] [NUMBER]"
         name: tuple[int, ...] | str = (
             parse_number(numbers[0]) if numbers else ()
         )
@@ -576,7 +618,7 @@ class Items:
         Returns an empty string on success, or an error string on failure.
         """
         if len(arguments) < 2:
-            return "Usage: tracker rename NUMBER TITLE..."
+            return "Usage: tracker COLLECTION rename NUMBER TITLE..."
         name: tuple[int, ...] | str = parse_number(arguments[0])
         if isinstance(name, str):
             return name
@@ -624,8 +666,11 @@ class Items:
             Items._test_items(check, root / "TASKS")
             Items._test_reload(check, root / "TASKS")
             Items._test_rename_delete(check, root / "rename_delete")
-            Items._test_commands(check, root / "commands")
             Items._test_errors(check, root / "errors")
+        # The commands search upward for collections, so they are tested
+        # away from the collections made by the other tests.
+        with tempfile.TemporaryDirectory() as temporary:
+            Items._test_commands(check, Path(temporary) / "commands")
         print(f"{len(checks)} checks, {len(failures)} failures")
         return 1 if failures else 0
 
@@ -651,6 +696,16 @@ class Items:
                 clean_title(title) == cleaned,
                 f"clean_title({title!r})",
             )
+        names: list[str] = ["TASKS", "Tools", "ISSUES"]
+        for word, matched in (
+            ("t", ["TASKS", "Tools"]), ("TA", ["TASKS"]), ("i", ["ISSUES"]),
+            ("x", []), ("", names), ("tasks", ["TASKS"]),
+        ):
+            check(matches(word, names) == matched, f"matches({word!r})")
+        check(
+            matches("task", ["TASK", "TASKS"]) == ["TASK"],
+            "an exact match wins",
+        )
         check(utc_stamp(0) == "1970-01-01T00:00:00Z", "utc_stamp")
         epoch: datetime = datetime.fromtimestamp(0, UTC).astimezone()
         check(
@@ -680,7 +735,10 @@ class Items:
     def _test_items(check: Check, directory: Path) -> None:
         """Test creating, listing and changing the state of items."""
         items: Items = Items(directory)
-        check(not items.error and directory.is_dir(), "create TASKS")
+        check(
+            not items.error and (directory / COLLECTION_FILE).is_file(),
+            "create TASKS",
+        )
         item: Item | str = items.create_item("1", "  top item  ")
         check(
             isinstance(item, Item) and item.title == "top item",
@@ -786,7 +844,15 @@ class Items:
             )
         items.set_state((2,), "Reference")
         items.create_item("3", "Later")
-        check(items.write_startup() == "", "write Startup.md")
+        issues: Items = Items(directory.parent / "ISSUES")
+        issues.create_item("1", "Crash")
+        issues.set_state((1,), "Open")
+        check(write_startup([issues]) == "", "no TASKS, no Startup.md")
+        check(
+            not (issues.items_directory / "Startup.md").exists(),
+            "Startup.md is only written into TASKS",
+        )
+        check(write_startup([issues, items]) == "", "write Startup.md")
         check(
             read_file(directory / "Startup.md")
             == "@1_Top_item/Details.md\n@1_Top_item/Context.md\n"
@@ -795,7 +861,9 @@ class Items:
             "@1.2.10_Item_1.2.10/Details.md\n"
             "@1.20_Item_1.20/Details.md\n@1.20_Item_1.20/Context.md\n"
             "@2_Item_2/Details.md\n@2_Item_2/Context.md\n"
-            "@3_Later/Details.md\n",
+            "@3_Later/Details.md\n"
+            "@../ISSUES/1_Crash/Details.md\n"
+            "@../ISSUES/1_Crash/Context.md\n",
             "Startup.md contents",
         )
 
@@ -843,6 +911,11 @@ class Items:
         check(
             metadata["updated"] == items.items[(8,)].updated != "x",
             "set_state sets the updated time",
+        )
+        items.set_state((8,), "Closed")
+        check(
+            read_item(old_format) == metadata,
+            "set_state to the same state changes nothing",
         )
         write_file(old_format / ITEM_FILE, "[]")
         check(
@@ -955,6 +1028,14 @@ class Items:
     @staticmethod
     def _test_commands(check: Check, directory: Path) -> None:
         """Test `run_command()` from inside `directory`."""
+        answers: list[str] = []
+        questions: list[str] = []
+
+        def ask(question: str) -> str:
+            questions.append(question)
+            if not answers:
+                raise EOFError
+            return answers.pop(0)
 
         def run(*arguments: str) -> tuple[int, str]:
             output: io.StringIO = io.StringIO()
@@ -962,64 +1043,154 @@ class Items:
                 contextlib.redirect_stdout(output),
                 contextlib.redirect_stderr(output),
             ):
-                code: int = Items.run_command(list(arguments))
+                code: int = Items.run_command(list(arguments), ask)
             return code, output.getvalue()
 
         directory.mkdir()
+        (directory / "plain").mkdir()
         original: Path = Path.cwd()
         os.chdir(directory)
         try:
-            for arguments, code, text in (
-                ((), 0, "Usage"),
-                (("help",), 0, "Usage"),
-                (("create", "1", "An", "item"), 0, ""),
-                (("create", "1.1", "Child"), 0, ""),
-                (("create", "1"), 1, "Usage"),
-                (("create", "1", "again"), 1, "already exists"),
-                (("ls",), 0, "An item"),
-                (("list", "1.1"), 0, "Child"),
-                (("ls", "x"), 1, "Invalid"),
-                (("ls", "1", "2"), 1, "Usage"),
-                (("ls", "-l"), 0, "An item"),
-                (("list", "--long", "1.1"), 0, "Child"),
-                (("ls", "-l", "1", "2"), 1, "Usage"),
-                (("close", "1"), 0, "Closed"),
-                (("suspend", "--recursive", "1"), 0, "1.1"),
-                (("open", "-r", "1"), 0, "Open"),
-                (("pending", "1.1"), 0, "Pending"),
-                (("reference", "1.1"), 0, "Reference"),
-                (("open",), 1, "Usage"),
-                (("close", "9"), 1, "does not exist"),
-                (("close", "x"), 1, "Invalid"),
-                (("rename", "1.1", "New", "child"), 0, "New child"),
-                (("rename", "1"), 1, "Usage"),
-                (("rename", "x", "y"), 1, "Invalid"),
-                (("rename", "9", "Nine"), 1, "does not exist"),
-                (("create", "2", "Doomed"), 0, ""),
-                (("delete", "2"), 0, "Doomed"),
-                (("delete",), 1, "Usage"),
-                (("delete", "x"), 1, "Invalid"),
-                (("delete", "-r", "9"), 1, "No items match"),
-                (("bogus",), 1, "Unknown command"),
+            for answer, arguments, code, text in (
+                ("", (), 0, "Usage"),
+                ("", ("--help",), 0, "Usage"),
+                ("", ("-h",), 0, "Usage"),
+                ("", ("--bogus",), 1, "Unknown option"),
+                ("", ("t", "ls"), 1, "No collection matches 't'\nUse"),
+                ("", ("TASKS", "create"), 1, "Not created"),
+                ("n", ("TASKS", "create"), 1, "Not created"),
+                ("y", ("TASKS", "create"), 0, "Created"),
+                ("", ("TASKS", "create"), 1, "Usage"),
+                ("yes", ("Issues", "cr"), 0, "Created"),
+                ("", ("a/b", "create"), 1, "Invalid collection name"),
+                ("", ("..", "create"), 1, "Invalid collection name"),
+                ("", ("plain", "create"), 1, "already exists"),
+                ("", ("x", "ls"), 1, "the collections are: Issues, TASKS"),
+                ("", ("t",), 1, "Usage"),
+                ("", ("t", "h"), 0, "Usage"),
+                ("", ("t", "bogus"), 1, "Unknown command"),
+                ("", ("t", "c", "1"), 1, "close, create"),
+                ("", ("t", "re", "1"), 1, "reference, rename"),
+                ("", ("t", "l", "1"), 0, ""),
+                ("", ("t", "create", "1", "An", "item"), 0, ""),
+                ("", ("T", "cr", "1.1", "Child"), 0, ""),
+                ("", ("tasks", "create", "1"), 1, "Usage"),
+                ("", ("t", "create", "1", "again"), 1, "already exists"),
+                ("", ("t", "ls"), 0, "An item"),
+                ("", ("t", "list", "1.1"), 0, "Child"),
+                ("", ("t", "l", "x"), 1, "Invalid"),
+                ("", ("t", "ls", "1", "2"), 1, "Usage"),
+                ("", ("t", "ls", "-l"), 0, "An item"),
+                ("", ("t", "li", "--long", "1.1"), 0, "Child"),
+                ("", ("t", "ls", "-l", "1", "2"), 1, "Usage"),
+                ("", ("t", "cl", "1"), 0, "Closed"),
+                ("", ("t", "s", "--recursive", "1"), 0, "1.1"),
+                ("", ("t", "o", "-r", "1"), 0, "Open"),
+                ("", ("t", "p", "1.1"), 0, "Pending"),
+                ("", ("t", "ref", "1.1"), 0, "Reference"),
+                ("", ("t", "open"), 1, "Usage"),
+                ("", ("t", "close", "9"), 1, "does not exist"),
+                ("", ("t", "close", "x"), 1, "Invalid"),
+                ("", ("t", "ren", "1.1", "New", "child"), 0, "New child"),
+                ("", ("t", "rename", "1"), 1, "Usage"),
+                ("", ("t", "rename", "x", "y"), 1, "Invalid"),
+                ("", ("t", "rename", "9", "Nine"), 1, "does not exist"),
+                ("", ("t", "create", "2", "Doomed"), 0, ""),
+                ("", ("t", "d", "2"), 0, "Doomed"),
+                ("", ("t", "delete"), 1, "Usage"),
+                ("", ("t", "delete", "x"), 1, "Invalid"),
+                ("", ("t", "delete", "-r", "9"), 1, "No items match"),
+                ("", ("i", "create", "1", "Crash"), 0, ""),
+                ("", ("I", "OPEN", "1"), 0, "Open"),
             ):
+                answers[:] = [answer] if answer else []
                 result: tuple[int, str] = run(*arguments)
                 check(
                     result[0] == code and text in result[1],
                     f"command {' '.join(arguments)!r}",
                 )
             check(
-                "@1_An_item/Details.md"
-                in read_file(Path("TASKS/Startup.md")),
-                "commands write Startup.md",
+                (directory / "TASKS" / COLLECTION_FILE).is_file()
+                and (directory / "Issues" / COLLECTION_FILE).is_file()
+                and not (directory / "plain" / COLLECTION_FILE).exists(),
+                "create collections named as typed",
             )
-            (directory / "file").mkdir()
-            os.chdir(directory / "file")
-            write_file(Path("TASKS"), "")
-            code, text = run("ls")
             check(
-                code == 1 and "Unable to create" in text,
-                "command with TASKS as a file",
+                questions[0]
+                == f"Create tracker directory '{Path.cwd() / 'TASKS'}'? "
+                "[y/N] ",
+                "ask before creating a collection",
             )
+            check(
+                read_file(Path("TASKS/Startup.md"))
+                == "@1_An_item/Details.md\n@1_An_item/Context.md\n"
+                "@1.1_New_child/Details.md\n@1.1_New_child/Context.md\n"
+                "@../Issues/1_Crash/Details.md\n"
+                "@../Issues/1_Crash/Context.md\n",
+                "commands write Startup.md for every collection",
+            )
+            os.chdir(directory / "TASKS" / "1_An_item")
+            check(run("t", "ls")[1].startswith("1  "), "search upward")
+            answers[:] = ["y"]
+            check(
+                run("Tools", "create")[0] == 0
+                and (directory / "Tools" / COLLECTION_FILE).is_file(),
+                "create a collection next to the others",
+            )
+            code, text = run("t", "ls")
+            check(
+                code == 1 and "more than one collection: TASKS, Tools" in text,
+                "ambiguous collection",
+            )
+            check(run("ta", "ls")[0] == 0, "unambiguous collection")
+            startup: Path = directory / "TASKS" / "Startup.md"
+            saved: str = read_file(startup)
+            startup.unlink()
+            startup.mkdir()
+            answers[:] = ["y"]
+            code, text = run("Docs", "create")
+            check(
+                code == 1 and "Unable to write" in text,
+                "create a collection when Startup.md can not be written",
+            )
+            startup.rmdir()
+            write_file(startup, saved)
+            if os.geteuid() == 0:
+                # Permissions are not enforced for root.
+                return  # pragma: no cover
+            (directory / "Tools").chmod(0o500)
+            try:
+                code, text = run("to", "ls")
+                check(
+                    code == 1 and "No write access" in text,
+                    "command in a read-only collection",
+                )
+            finally:
+                (directory / "Tools").chmod(0o700)
+            (directory / "TASKS").chmod(0o500)
+            answers[:] = ["y"]
+            try:
+                code, text = run("Rules", "create")
+                check(
+                    code == 0
+                    and "No write access" in text
+                    and "@1_An_item/" in read_file(
+                        directory / "TASKS" / "Startup.md"
+                    ),
+                    "create a collection with a read-only TASKS",
+                )
+            finally:
+                (directory / "TASKS").chmod(0o700)
+            (directory).chmod(0o500)
+            answers[:] = ["y"]
+            try:
+                code, text = run("More", "create")
+                check(
+                    code == 1 and "Unable to create" in text,
+                    "create a collection in a read-only directory",
+                )
+            finally:
+                directory.chmod(0o700)
         finally:
             os.chdir(original)
 
@@ -1044,7 +1215,7 @@ class Items:
         )
         (directory / "TASKS" / "Startup.md").mkdir()
         check(
-            "Unable to write" in items.write_startup(),
+            "Unable to write" in write_startup([items]),
             "write_startup failure",
         )
         if os.geteuid() == 0:
@@ -1064,42 +1235,179 @@ class Items:
             read_only.chmod(0o700)
 
     @staticmethod
-    def run_command(arguments: list[str]) -> int:
-        """Run an item tracker command.
+    def create_collection(
+        name: str, directories: list[Path], ask: Callable[[str], str]
+    ) -> int:
+        """Run `NAME create` to create the collection directory `name`.
 
-        Returns 0 for success and 1 for failure.
+        It goes next to the existing collection `directories`, or else in
+        the current directory, after `ask` gets a yes answer.  Returns 0
+        for success and 1 for failure.
         """
-        if not arguments:
-            print(HELP)
-            return 0
-        if arguments == ["test"]:
-            return Items.test()
-        items: Items = Items()
-        if items.error:
+        if name in ("", ".", "..") or Path(name).name != name:
+            print(f"Invalid collection name '{name}'", file=sys.stderr)
             return 1
-        command: str = arguments[0]
-        error: str = ""
-        match command:
-            case "help" | "-h" | "--help":
-                print(HELP)
-            case "create":
-                error = items.create_command(arguments[1:])
-            case "list" | "ls":
-                error = items.list_command(arguments[1:])
-            case "pending" | "open" | "reference" | "suspend" | "close":
-                error = items.state_command(command, arguments[1:])
-            case "rename":
-                error = items.rename_command(arguments[1:])
-            case "delete":
-                error = items.delete_command(arguments[1:])
-            case _:
-                error = f"Unknown command '{command}'\n{HELP}"
-        if not error:
-            error = items.write_startup()
+        parent: Path = directories[0].parent if directories else Path.cwd()
+        path: Path = parent / name
+        if path.exists():
+            print(f"'{path}' already exists", file=sys.stderr)
+            return 1
+        try:
+            answer: str = ask(f"Create tracker directory '{path}'? [y/N] ")
+        except EOFError:
+            answer = ""
+        if answer.strip().casefold() not in ("y", "yes"):
+            print("Not created", file=sys.stderr)
+            return 1
+        created: Items = Items(path)
+        if created.error:
+            return 1
+        print(f"Created '{path}'")
+        collections: list[Items] = [
+            Items(directory) for directory in directories
+        ]
+        error: str = write_startup(
+            [
+                collection
+                for collection in [created, *collections]
+                if not collection.error
+            ]
+        )
         if error:
             print(error, file=sys.stderr)
             return 1
         return 0
+
+    @staticmethod
+    def run_command(
+        arguments: list[str], ask: Callable[[str], str] = input
+    ) -> int:
+        """Run an item tracker command.
+
+        `ask` is called with a yes/no question before a new collection is
+        created, and returns the answer.  Returns 0 for success and 1 for
+        failure.
+        """
+        if not arguments or arguments[0] in ("-h", "--help"):
+            print(HELP)
+            return 0
+        if arguments == ["--test"]:
+            return Items.test()
+        error: str = ""
+        directories: list[Path] = find_collections(Path.cwd())
+        names: list[str] = [directory.name for directory in directories]
+        found: list[str] = matches(arguments[0], names)
+        commands: list[str] = (
+            sorted(
+                {COMMANDS[name] for name in matches(arguments[1], COMMANDS)}
+            )
+            if len(arguments) > 1
+            else []
+        )
+        if arguments[0].startswith("-"):
+            error = f"Unknown option '{arguments[0]}'\n{HELP}"
+        elif len(found) > 1:
+            error = (
+                f"'{arguments[0]}' matches more than one collection: "
+                f"{', '.join(found)}"
+            )
+        elif len(arguments) < 2:
+            error = "Usage: tracker COLLECTION COMMAND [ARGUMENTS...]"
+        elif not commands:
+            error = (
+                f"Unknown command '{arguments[1]}'; the commands are: "
+                f"{', '.join(COMMANDS)}"
+            )
+        elif len(commands) > 1:
+            error = (
+                f"'{arguments[1]}' matches more than one command: "
+                f"{', '.join(commands)}"
+            )
+        elif not found and commands == ["create"] and len(arguments) == 2:
+            return Items.create_collection(arguments[0], directories, ask)
+        elif not found:
+            error = f"No collection matches '{arguments[0]}'"
+            if names:
+                error += f"; the collections are: {', '.join(names)}"
+            error += "\nUse `tracker NAME create` to create one."
+        if error:
+            print(error, file=sys.stderr)
+            return 1
+        collections: list[Items] = [
+            Items(directory) for directory in directories
+        ]
+        items: Items = collections[names.index(found[0])]
+        if items.error:
+            return 1
+        rest: list[str] = arguments[2:]
+        match commands[0]:
+            case "help":
+                print(HELP)
+            case "create":
+                error = items.create_command(rest)
+            case "list":
+                error = items.list_command(rest)
+            case "rename":
+                error = items.rename_command(rest)
+            case "delete":
+                error = items.delete_command(rest)
+            case state_command:
+                error = items.state_command(state_command, rest)
+        if not error:
+            error = write_startup(
+                [
+                    collection
+                    for collection in collections
+                    if not collection.error
+                ]
+            )
+        if error:
+            print(error, file=sys.stderr)
+            return 1
+        return 0
+
+
+def write_startup(collections: list["Items"]) -> str:
+    """Write `Startup.md` into the TASKS collection, if there is one.
+
+    Every line is an `@` import, relative to the TASKS collection, of the
+    `Details.md` of every item, and the `Context.md` of every Open or
+    Reference item, so that adding `@TASKS/Startup.md` to `CLAUDE.md`
+    loads them.  The TASKS items come first, then the items of the other
+    `collections` in order.  Returns an empty string on success, or an
+    error string on failure.
+    """
+    startup: Items | None = next(
+        (
+            collection
+            for collection in collections
+            if collection.items_directory.name == STARTUP_COLLECTION
+        ),
+        None,
+    )
+    if startup is None:
+        return ""
+    lines: list[str] = []
+    for collection in [startup] + [
+        collection for collection in collections if collection is not startup
+    ]:
+        for item in collection.list_items():
+            item_directory: Path = collection.directories[item.name]
+            relative: str = Path(
+                os.path.relpath(item_directory, startup.items_directory)
+            ).as_posix()
+            file_names: tuple[str, ...] = ("Details.md",)
+            if item.state in CONTEXT_STATES:
+                file_names += ("Context.md",)
+            for file_name in file_names:
+                if (item_directory / file_name).is_file():
+                    lines.append(f"@{relative}/{file_name}")
+    startup_path: Path = startup.items_directory / "Startup.md"
+    try:
+        write_file(startup_path, "".join(f"{line}\n" for line in lines))
+    except OSError as error:
+        return f"Unable to write '{startup_path}': {error}"
+    return ""
 
 
 def print_items(items: list[Item], long: bool = False) -> None:

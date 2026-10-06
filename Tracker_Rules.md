@@ -2,10 +2,12 @@
 
 <!-- --------------------------- 79 characters ---------------------------- -->
 
-The `tracker` program is used to create and manage items (see `README.md`.)
-`tracker help` lists all of the commands.  When first used, it ensures that a
-`TASKS/` sub-directory exists.  The `tracker create` command (e.g.
-`tracker create 1.2.3 New Task`) creates an item directory (e.g.
+The `tracker` program is used to create and manage items in collections
+such as `TASKS/` and `ISSUES/` (see `README.md`.)  `tracker` with no
+arguments lists all of the commands.  Every command starts with the
+collection, which (like the command) may be any unique prefix in any case.
+The `create` command (e.g. `tracker TASKS create 1.2.3 New Task`, or
+`tracker t cr 1.2.3 New Task`) creates an item directory (e.g.
 `TASKS/1.2.3_New_Task/`) containing:
 
 * `Details.md`:
@@ -15,8 +17,9 @@ The `tracker` program is used to create and manage items (see `README.md`.)
    Edited by Claude to retain useful item context across sessions.  Claude
    edits it directly; there is no `tracker` command for it.
 * `.item.json`:
-   Managed by `tracker`.  Claude changes the state with `tracker pending`,
-   `open`, `reference`, `suspend` and `close`, never by editing this file.
+   Managed by `tracker`.  Claude changes the state with the `pending`,
+   `open`, `reference`, `suspend` and `close` commands (e.g.
+   `tracker t close 2`), never by editing this file.
 
 New items start out Pending.  The states are Pending, Open, Reference,
 Suspended and Closed.  A Reference item is not being worked on, but its
@@ -24,5 +27,5 @@ Suspended and Closed.  A Reference item is not being worked on, but its
 
 Every time `tracker` is successfully run, it overwrites `TASKS/Startup.md`
 with `@` imports of the `Details.md` of every item and the `Context.md` of
-every Open or Reference item, so that the `@TASKS/Startup.md` import in
-`CLAUDE.md` loads them.
+every Open or Reference item, in every collection, so that the
+`@TASKS/Startup.md` import in `CLAUDE.md` loads them.
