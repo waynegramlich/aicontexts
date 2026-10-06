@@ -19,8 +19,10 @@ with the following information:
 * Number:
   A unique hierarchical number (e.g. `1.2.3`) giving the Item's place in
   the tree.  There are never gaps: if `1.3` exists, so do `1.1` and
-  `1.2`.  Numbers change as Items are deleted (and, later, moved), so
-  they are never used in text; tags are.
+  `1.2`.  Items can be created or moved to the next free number of a
+  level, or `before` or `after` an existing Item, and the others are
+  renumbered to make room or close the gap.  Numbers change as Items are
+  created, deleted and moved, so they are never used in text; tags are.
 * Tag:
   A short name: the capitalized first letter of the collection and a
   period, then the first letter of each word of the Title in lower case,
@@ -54,6 +56,10 @@ Claude Code `@` imports: one for the `Details.md` of every Item, plus one for
 the `Context.md` of every Open or Reference Item, for every collection (e.g.
 `@../ISSUES/1_Crash/Details.md`).  Adding `@TASKS/Startup.md` to `CLAUDE.md`
 loads them at the start of each AI session.
+
+Moves and renames can be undone and redone (`tracker t undo [N]`,
+`tracker t redo [N]`), back to the last create, delete, state change or
+priority change, which can not be undone.
 
 Run `tracker` with no arguments to list the commands.  `tracker t ls -l` also
 lists the created and updated times in the local time zone.

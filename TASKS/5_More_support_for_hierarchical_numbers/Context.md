@@ -83,3 +83,27 @@ M. `undo N` / `redo N` with fewer than N steps available refuses and
   headings had changed).  Demos now go in a scratch directory.
 * Next (after the user's commit): G.3 positions for `create`/`move`
   (`before`/`after`), `rename ... to`, and undo/redo.
+
+## 2026-10-05 Progress: G.3 places, move, rename to, undo/redo (done)
+
+* `Items.plan_place(moving, place, target)` plans every renumbering:
+  builds ordered child lists, removes the moving siblings (in place!),
+  inserts them (or `NEW_ITEM`) at the free number / before / after the
+  target (names as before the move), then renumbers the whole tree.
+* `create [before|after] NUMBER TITLE` (`create_at_place`, `make_item`);
+  `move RANGE [before|after] NUMBER` (`move_items`); `rename NUMBER to
+  TITLE` (`to` required).  Output: "Renumbered (old number first):" with
+  aligned `old -> new` columns (`print_items(old_numbers=...)`).
+* Undo/redo: `.tracker.json` keys "undo"/"redo", lists of steps
+  `{"command": "move", "renumbered": [[old, new], ...]}` or
+  `{"command": "rename", "number", "old": [title, tag], "new": [...]}`.
+  `record()` (limit `UNDO_LIMIT` = 100, clears redo), `clear_history()`
+  (fences: create, delete, real state change, priority change, gap fix),
+  `step_history(count, undo)` saves after every step; damaged history
+  (bad JSON shape, missing items, a move that would leave gaps) is
+  reported, not applied.  Fewer than N steps: refused.
+* Bugs found by the new tests: `plan_place` replaced a list that was
+  still referenced; `renumber` overwrote dict entries when a new name was
+  another item's old name.  Both fixed.
+* 306 checks; coverage misses only `# pragma: no cover` lines (a new
+  `_test_write_failures` covers the write-error returns).

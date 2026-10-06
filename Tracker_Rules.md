@@ -29,10 +29,16 @@ wherever they take a number (e.g. `tracker t close T.fbm`).  Renaming an
 item can change its tag, in which case Claude updates every reference to
 the old tag in the same pass.
 
-Item numbers never have gaps.  `delete` is permanent: it refuses an item
-with children unless given `-r` (which asks first), and renumbers the
-later items.  Never run `delete` (or other changing commands) on the real
-items just to see what happens; try it in a scratch directory.
+Item numbers never have gaps.  `create` and `move` take a place: the next
+free number of a level (e.g. `1.3`), or `before NUMBER` / `after NUMBER`
+(e.g. `tracker t move T.fbm after 2.1`, or `tracker t create before 1.1
+Fix Big Mistake`).  `rename NUMBER to TITLE...` changes a title.  Moves
+and renames can be undone with `undo [N]` and redone with `redo [N]`, but
+not past a create, delete, state change or priority change.  `delete` is
+permanent: it refuses an item with children unless given `-r` (which asks
+first), and renumbers the later items.  Never run `delete` (or other
+changing commands) on the real items just to see what happens; try it in
+a scratch directory.
 
 When priority is enabled for a collection (e.g. `tracker i enable
 priority`, as it is for `ISSUES/`), items may have a priority set with
