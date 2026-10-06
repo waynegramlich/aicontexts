@@ -54,11 +54,12 @@ priority`, as it is for `ISSUES/`), items may have a priority set with
 * **3**: A low priority that gets put near the end of the list.
 `-` removes the priority.
 
-Before closing an item, Claude writes a `## Summary` section near the top
-of its `Context.md`: what was decided and done, with the tags of related
-items.  Once the item is closed, only that summary (in the generated
-`TASKS/Closed.md`) is loaded at startup, so it should be enough to know
-that the item exists and what it settled.  `tracker T.fbm show` and the
+Before closing an item, Claude writes its `Summary.md` (below the heading
+line that `tracker` maintains): what was decided and done, with the tags of
+related items.  Once the item is closed, only that summary is loaded at
+startup (and after the 50 most recently closed, only its tag and title, in
+the generated `TASKS/Closed.md`), so it should be enough to know that the
+item exists and what it settled.  `tracker T.fbm show` and the
 item's files give the rest when needed.
 
 New items start out Pending.  The states are Pending, Open, Reference,

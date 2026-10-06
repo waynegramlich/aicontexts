@@ -46,6 +46,10 @@ with the following information:
   line is a heading with the Number and Title (e.g. `# 1.2.3 Title`.)
 * `Context.md`:
   A file managed by an AI LLM that has additional AI context information.
+* `Summary.md`:
+  A short summary of what the Item settled, written by the AI LLM before the
+  Item is closed.  Its first line (``# Summary of `T.fbm` Title``) is kept up
+  to date by `tracker`.
 * `.item.json`:
   A hidden file managed by `tracker` that holds the State, Tag, Priority,
   the created and updated times (in UTC), and a history of every State
@@ -54,11 +58,12 @@ with the following information:
 Every time `tracker` runs, it rewrites `TASKS/Startup.md`.  It contains only
 Claude Code `@` imports: one for the `Details.md` of every Item that is not
 Closed, plus one for the `Context.md` of every Open or Reference Item, for
-every collection (e.g. `@../ISSUES/1_Crash/Details.md`), and finally one for
-`TASKS/Closed.md`.  That file is also written by `tracker`: the 50 most
-recently closed Items with their closing dates and the `## Summary` section
-of their `Context.md`, then the older ones by tag and title only.  (The test
-suite changes the 50 with `TRACKER_TEST_CLOSED_SUMMARIES`.)  Adding
+every collection (e.g. `@../ISSUES/1_Crash/Details.md`).  Then come the
+`Summary.md` files of the 50 most recently closed Items, newest first (their
+`Details.md` if the summary is still empty), and finally, if there are older
+closed Items, `TASKS/Closed.md`, which `tracker` writes to list them by tag
+and title only.  (The test suite changes the 50 with
+`TRACKER_TEST_CLOSED_SUMMARIES`.)  Adding
 `@TASKS/Startup.md` to `CLAUDE.md` loads them at the start of each AI
 session.
 

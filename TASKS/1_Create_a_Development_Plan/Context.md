@@ -1,14 +1,5 @@
 # LLM Agent Context Log
 
-## Summary
-
-Turned `tracker.py` (a copy of `claude_notes/task.py`) into a plan to
-match `README.md`: Items with Title, Number, State, a tag and optional
-priority; one collection per class of Item (`TASKS/`, `ISSUES/`), each
-marked by `.tracker.json`; per-item metadata in `.item.json`; a single
-`TASKS/Startup.md` of `@` imports.  The work became tasks 2 to 6
-(`T.c`, `T.smic`, `T.asfi`, `T.msfhn`, `T.rratc`).
-
 ## 2026-10-05 Planning discussion (complete)
 
 Starting point: `tracker.py` was a straight copy of `claude_notes/task.py`

@@ -74,9 +74,10 @@ continue.
 Item states are: Pending, Open, Reference, Suspended, Closed
 New items are created Pending.  Open items are being worked on.  Reference
 items are not, but like Open items their Context.md is in Startup.md.
-Closed items are listed in a generated TASKS/Closed.md instead: the 50
-most recently closed with the "## Summary" section of their Context.md,
-the rest by tag and title only.
+Each item also has a Summary.md, written before it is closed.  For the 50
+most recently closed items, Startup.md has their Summary.md (or Details.md
+if the summary is empty); older closed items are listed by tag and title
+in a generated TASKS/Closed.md.
 
 Each item has a tag: the capitalized first letter of its collection and a
 period, then the first letter of each word of its title in lower case,
@@ -122,7 +123,8 @@ TAG_COMMANDS: frozenset[str] = frozenset(
     }
 )
 
-# The number of most recently closed items that `Closed.md` summarizes;
+# The number of most recently closed items whose `Summary.md` is in
+# `Startup.md`;
 # the test suite can change it with the environment variable named by
 # `SUMMARIES_VARIABLE`.
 CLOSED_SUMMARIES: int = 50
@@ -400,6 +402,36 @@ def tag_collection(word: str, names: list[str]) -> str:
     return next(
         (name for name in names if tag_prefix(name) == word[:2].upper()), ""
     )
+
+
+def summary_heading(tag: str, title: str) -> str:
+    """Return the first line of an item's `Summary.md`."""
+    return f"# Summary of `{tag}` {title}"
+
+
+def write_summary_heading(item_directory: Path, heading: str) -> None:
+    """Make `heading` the first line of the item's `Summary.md`.
+
+    The old heading is replaced, or the file is made if it is missing.
+    Raises an `OSError` if the file can not be read or written.
+    """
+    path: Path = item_directory / "Summary.md"
+    text: str = read_file(path) if path.exists() else ""
+    first, _, rest = text.partition("\n")
+    if not first.startswith("# Summary of "):
+        rest = text
+    write_file(path, f"{heading}\n{rest}")
+
+
+def has_summary(item_directory: Path) -> bool:
+    """Return whether the item's `Summary.md` says more than its heading."""
+    try:
+        text: str = read_file(item_directory / "Summary.md")
+    except OSError:
+        return False
+    if text.startswith("# Summary of "):
+        text = text.partition("\n")[2]
+    return bool(text.strip())
 
 
 def tag_references(root: Path, tag: str) -> list[Path]:
@@ -751,6 +783,7 @@ class Items:
             else:
                 self.directories[name] = item_directory
         self.add_missing_tags()
+        self.add_missing_summaries()
         self.fix_gaps()
 
     def missing_names(self) -> list[tuple[int, ...]]:
@@ -962,6 +995,27 @@ class Items:
         if error:
             print(error, file=sys.stderr)
 
+    def add_missing_summaries(self) -> None:
+        """Give an empty `Summary.md` to every item that does not have one.
+
+        This is for items made before `Summary.md` existed.  A file that
+        can not be written is reported to stderr.
+        """
+        for item in self.list_items():
+            item_directory: Path = self.directories[item.name]
+            if (item_directory / "Summary.md").exists():
+                continue
+            try:
+                write_summary_heading(
+                    item_directory,
+                    summary_heading(f"{self.prefix}{item.tag}", item.title),
+                )
+            except OSError as error:
+                print(
+                    f"Unable to add a summary to '{item_directory}': {error}",
+                    file=sys.stderr,
+                )
+
     def add_missing_tags(self) -> None:
         """Give a unique tag to every item that does not have one.
 
@@ -1092,6 +1146,9 @@ class Items:
             write_file(
                 item_directory / "Details.md", f"# {number} {title}\n"
             )
+            write_summary_heading(
+                item_directory, summary_heading(f"{self.prefix}{tag}", title)
+            )
         except OSError as error:
             return (
                 f"Unable to create item directory '{item_directory}': {error}"
@@ -1121,7 +1178,8 @@ class Items:
         """Change the title of item `name`.
 
         The item directory is renamed to match, and the heading line of its
-        `Details.md` is rewritten, or added if it is missing.  The tag is
+        `Details.md` is rewritten, or added if it is missing, as is the
+        heading of its `Summary.md`.  The tag is
         made from the new title, unless it would be the same as before.
         The updated time is set to now.  Returns the renamed item, or an
         error string if it can not be renamed.
@@ -1157,6 +1215,9 @@ class Items:
             if not heading.startswith(f"# {number} "):
                 rest = details
             write_file(details_path, f"# {number} {title}\n{rest}")
+            write_summary_heading(
+                old_directory, summary_heading(f"{self.prefix}{tag}", title)
+            )
             updated: str = update_item(old_directory, fields={"tag": tag})
             old_directory.rename(new_directory)
         except (OSError, ValueError) as error:
@@ -2505,25 +2566,35 @@ class Items:
 
     @staticmethod
     def _test_closed(check: Check, directory: Path) -> None:
-        """Test `Closed.md` and leaving Closed items out of `Startup.md`."""
+        """Test `Summary.md`, `Closed.md` and Closed items in `Startup.md`."""
         directory.mkdir()
         tasks: Items = Items(directory / "TASKS")
         issues: Items = Items(directory / "ISSUES")
-        for number, title in (("1", "Alpha"), ("2", "Beta"), ("3", "Gamma")):
+        for number, title in (
+            ("1", "Alpha"), ("2", "Beta"), ("3", "Gamma"), ("4", "Delta")
+        ):
             tasks.create_item(number, title)
         issues.create_item("1", "Crash")
-        write_file(
-            tasks.directories[(1,)] / "Context.md",
-            "# LLM Agent Context Log\n\n## Summary\n\nAlpha is done.\n\n"
-            "It went well.\n\n## 2026-10-06\n\nNotes.\n",
+        check(
+            read_file(tasks.directories[(1,)] / "Summary.md")
+            == "# Summary of `T.a` Alpha\n"
+            and not has_summary(tasks.directories[(1,)]),
+            "a new item has an empty Summary.md",
         )
         write_file(
-            issues.directories[(1,)] / "Context.md",
-            "## SUMMARY\nFixed the crash.\n",
+            tasks.directories[(1,)] / "Summary.md",
+            "# Summary of `T.a` Alpha\n\nAlpha is done.\n",
+        )
+        write_file(issues.directories[(1,)] / "Summary.md", "Fixed it.\n")
+        check(
+            has_summary(tasks.directories[(1,)])
+            and has_summary(issues.directories[(1,)]),
+            "a Summary.md with more than its heading",
         )
         # Closed in this order, a day apart.
         for collection, name, date in (
-            (tasks, (2,), 1), (issues, (1,), 2), (tasks, (1,), 3)
+            (tasks, (4,), 1), (tasks, (2,), 2), (issues, (1,), 3),
+            (tasks, (1,), 4),
         ):
             collection.set_state(name, "Closed")
             metadata: dict[str, object] = read_item(
@@ -2535,59 +2606,74 @@ class Items:
             write_item(collection.directories[name], metadata)
         saved: str | None = os.environ.pop(SUMMARIES_VARIABLE, None)
         try:
-            os.environ[SUMMARIES_VARIABLE] = "2"
+            os.environ[SUMMARIES_VARIABLE] = "3"
             check(write_startup([issues, tasks]) == "", "write Closed.md")
             check(
                 read_file(directory / "TASKS" / "Startup.md")
-                == "@3_Gamma/Details.md\n@Closed.md\n",
-                "Startup.md imports Closed.md instead of closed items",
+                == "@3_Gamma/Details.md\n@1_Alpha/Summary.md\n"
+                "@../ISSUES/1_Crash/Summary.md\n@2_Beta/Details.md\n"
+                "@Closed.md\n",
+                "Startup.md has the newest summaries, then Closed.md",
             )
-            third: str = local_time("2026-10-03T12:00:00Z")[:10]
-            second: str = local_time("2026-10-02T12:00:00Z")[:10]
             check(
                 read_file(directory / "TASKS" / "Closed.md")
-                == "# Closed Items\n\n"
+                == "# Older Closed Items\n\n"
                 "<!-- Written by tracker; do not edit. -->\n\n"
-                "The most recently closed items (up to 2), with summaries:\n"
-                f"\n- `T.a` Alpha (closed {third}):\n"
-                "  Alpha is done.\n\n  It went well.\n"
-                f"- `I.c` Crash (closed {second}):\n"
-                "  Fixed the crash.\n\nOlder closed items:\n\n"
-                "- `T.b` Beta\n",
-                "Closed.md contents",
+                "These closed items are only listed by tag and title; "
+                "`tracker TAG\nshow` shows the rest.\n\n- `T.d` Delta\n",
+                "Closed.md lists the older closed items",
             )
             os.environ[SUMMARIES_VARIABLE] = "junk"
             write_startup([issues, tasks])
             check(
-                "Older" not in read_file(directory / "TASKS" / "Closed.md")
-                and "- `T.b` Beta (closed" in read_file(
-                    directory / "TASKS" / "Closed.md"
-                )
-                and "(no summary)" in read_file(
-                    directory / "TASKS" / "Closed.md"
-                ),
-                f"{CLOSED_SUMMARIES} summaries by default",
+                "@4_Delta/Details.md"
+                in read_file(directory / "TASKS" / "Startup.md")
+                and not (directory / "TASKS" / "Closed.md").exists(),
+                f"{CLOSED_SUMMARIES} summaries by default, so no Closed.md",
             )
         finally:
             del os.environ[SUMMARIES_VARIABLE]
             if saved is not None:
                 os.environ[SUMMARIES_VARIABLE] = saved  # pragma: no cover
-        (tasks.directories[(2,)] / "Context.md").unlink()
+        tasks.rename_item((3,), "Gamma Ray")
+        check(
+            read_file(tasks.directories[(3,)] / "Summary.md")
+            == "# Summary of `T.gr` Gamma Ray\n",
+            "rename rewrites the Summary.md heading",
+        )
+        write_file(tasks.directories[(3,)] / "Summary.md", "Notes.\n")
+        tasks.rename_item((3,), "Gamma")
+        check(
+            read_file(tasks.directories[(3,)] / "Summary.md")
+            == "# Summary of `T.g` Gamma\nNotes.\n",
+            "rename adds a missing Summary.md heading",
+        )
+        (tasks.directories[(3,)] / "Summary.md").unlink()
+        with contextlib.redirect_stderr(io.StringIO()):
+            reloaded: Items = Items(directory / "TASKS")
+        check(
+            read_file(reloaded.directories[(3,)] / "Summary.md")
+            == "# Summary of `T.g` Gamma\n",
+            "an item without a Summary.md gets one on load",
+        )
+        (tasks.directories[(2,)] / "Summary.md").unlink()
+        (tasks.directories[(2,)] / "Summary.md").mkdir()
         write_file(tasks.directories[(2,)] / ITEM_FILE, "[]")
         check(
-            context_summary(tasks.directories[(2,)]) == ""
+            not has_summary(tasks.directories[(2,)])
             and closed_time(tasks.items[(2,)], tasks.directories[(2,)])
             == tasks.items[(2,)].updated,
-            "a closed item without a summary or a readable history",
+            "a closed item without a readable summary or history",
         )
-        (directory / "TASKS" / "Closed.md").unlink()
-        (directory / "TASKS" / "Closed.md").mkdir()
-        check(
-            "Unable to write" in write_startup([issues, tasks]),
-            "Closed.md can not be written",
-        )
-        for collection, name in ((tasks, (1,)), (tasks, (2,)), (issues, (1,))):
-            collection.items[name].state = "Open"
+        os.environ[SUMMARIES_VARIABLE] = "1"
+        try:
+            (directory / "TASKS" / "Closed.md").mkdir()
+            check(
+                "Unable to write" in write_startup([issues, tasks]),
+                "Closed.md can not be written",
+            )
+        finally:
+            del os.environ[SUMMARIES_VARIABLE]
         check(
             "Unable to write" in write_startup([issues, tasks]),
             "Closed.md can not be removed",
@@ -2595,10 +2681,23 @@ class Items:
         (directory / "TASKS" / "Closed.md").rmdir()
         check(
             write_startup([issues, tasks]) == ""
-            and not (directory / "TASKS" / "Closed.md").exists()
-            and "@Closed.md"
-            not in read_file(directory / "TASKS" / "Startup.md"),
-            "no Closed.md without closed items",
+            and not (directory / "TASKS" / "Closed.md").exists(),
+            "no Closed.md without older closed items",
+        )
+        if os.geteuid() == 0:
+            # Permissions are not enforced for root.
+            return  # pragma: no cover
+        (issues.directories[(1,)] / "Summary.md").unlink()
+        issues.directories[(1,)].chmod(0o500)
+        errors: io.StringIO = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(errors):
+                Items(directory / "ISSUES")
+        finally:
+            issues.directories[(1,)].chmod(0o700)
+        check(
+            "Unable to add a summary" in errors.getvalue(),
+            "report a Summary.md that can not be added",
         )
 
     @staticmethod
@@ -3239,14 +3338,16 @@ def write_startup(collections: list["Items"]) -> str:
     """Write `Startup.md` (and `Closed.md`) into the TASKS collection.
 
     Nothing is written if there is no TASKS collection.  Every line of
-    `Startup.md` is an `@` import, relative to the TASKS collection, of
-    the `Details.md` of every item that is not Closed, and the
-    `Context.md` of every Open or Reference item, so that adding
-    `@TASKS/Startup.md` to `CLAUDE.md` loads them.  The TASKS items come
-    first, then the items of the other `collections` in order.  The
-    Closed items are written to `Closed.md` by `write_closed()`, which
-    `Startup.md` imports last.  Returns an empty string on success, or an
-    error string on failure.
+    `Startup.md` is an `@` import, relative to the TASKS collection, so
+    that adding `@TASKS/Startup.md` to `CLAUDE.md` loads them: the
+    `Details.md` of every item that is not Closed and the `Context.md` of
+    every Open or Reference item (the TASKS items first, then those of the
+    other `collections` in order), then the `Summary.md` (or `Details.md`
+    if the summary is empty) of the `CLOSED_SUMMARIES` (or the number in
+    the `SUMMARIES_VARIABLE` environment variable) most recently Closed
+    items, newest first, and finally `Closed.md` if there are older Closed
+    items (see `write_closed()`).  Returns an empty string on success, or
+    an error string on failure.
     """
     startup: Items | None = next(
         (
@@ -3259,12 +3360,15 @@ def write_startup(collections: list["Items"]) -> str:
     if startup is None:
         return ""
     lines: list[str] = []
-    closed: list[tuple[str, str, str, Path]] = []
+    closed: list[tuple[str, str, str, Path, str]] = []
     for collection in [startup] + [
         collection for collection in collections if collection is not startup
     ]:
         for item in collection.list_items():
             item_directory: Path = collection.directories[item.name]
+            relative: str = Path(
+                os.path.relpath(item_directory, startup.items_directory)
+            ).as_posix()
             if item.state == "Closed":
                 closed.append(
                     (
@@ -3272,26 +3376,36 @@ def write_startup(collections: list["Items"]) -> str:
                         f"{collection.prefix}{item.tag}",
                         item.title,
                         item_directory,
+                        relative,
                     )
                 )
                 continue
-            relative: str = Path(
-                os.path.relpath(item_directory, startup.items_directory)
-            ).as_posix()
             file_names: tuple[str, ...] = ("Details.md",)
             if item.state in CONTEXT_STATES:
                 file_names += ("Context.md",)
             for file_name in file_names:
                 if (item_directory / file_name).is_file():
                     lines.append(f"@{relative}/{file_name}")
-    if closed:
+    limit: int = CLOSED_SUMMARIES
+    with contextlib.suppress(ValueError):
+        limit = int(os.environ.get(SUMMARIES_VARIABLE, limit))
+    closed.sort(key=lambda entry: entry[0], reverse=True)
+    for _, _, _, item_directory, relative in closed[:limit]:
+        summary_file: str = (
+            "Summary.md" if has_summary(item_directory) else "Details.md"
+        )
+        lines.append(f"@{relative}/{summary_file}")
+    older: list[tuple[str, str]] = [
+        (tag, title) for _, tag, title, _, _ in closed[limit:]
+    ]
+    if older:
         lines.append("@Closed.md")
     startup_path: Path = startup.items_directory / "Startup.md"
     try:
         write_file(startup_path, "".join(f"{line}\n" for line in lines))
     except OSError as error:
         return f"Unable to write '{startup_path}': {error}"
-    return write_closed(startup.items_directory / "Closed.md", closed)
+    return write_closed(startup.items_directory / "Closed.md", older)
 
 
 def closed_time(item: "Item", item_directory: Path) -> str:
@@ -3307,65 +3421,27 @@ def closed_time(item: "Item", item_directory: Path) -> str:
     return item.updated
 
 
-def context_summary(item_directory: Path) -> str:
-    """Return the "## Summary" section of the item's `Context.md`.
+def write_closed(closed_path: Path, older: list[tuple[str, str]]) -> str:
+    """Write `Closed.md`, or remove it if there are no `older` items.
 
-    Returns an empty string if there is none.
+    `older` holds the tag and title of each Closed item whose summary is
+    not in `Startup.md`, newest first.  Returns an empty string on
+    success, or an error string on failure.
     """
-    try:
-        lines: list[str] = read_file(item_directory / "Context.md").split(
-            "\n"
-        )
-    except OSError:
-        return ""
-    summary: list[str] = []
-    inside: bool = False
-    for line in lines:
-        if line.startswith("#"):
-            inside = line.strip().casefold() == "## summary"
-        elif inside:
-            summary.append(line)
-    return "\n".join(summary).strip()
-
-
-def write_closed(
-    closed_path: Path, closed: list[tuple[str, str, str, Path]]
-) -> str:
-    """Write `Closed.md`, or remove it if nothing is `closed`.
-
-    `closed` holds the closed time, tag, title and directory of each
-    Closed item.  The most recently closed `CLOSED_SUMMARIES` items (or
-    the number in the `SUMMARIES_VARIABLE` environment variable) are
-    listed with their closing date and `context_summary()`, and the rest
-    by tag and title only.  Returns an empty string on success, or an
-    error string on failure.
-    """
-    limit: int = CLOSED_SUMMARIES
-    with contextlib.suppress(ValueError):
-        limit = int(os.environ.get(SUMMARIES_VARIABLE, limit))
-    ordered: list[tuple[str, str, str, Path]] = sorted(
-        closed, key=lambda entry: entry[0], reverse=True
-    )
     lines: list[str] = [
-        "# Closed Items",
+        "# Older Closed Items",
         "",
         "<!-- Written by tracker; do not edit. -->",
         "",
-        f"The most recently closed items (up to {limit}), with summaries:",
+        "These closed items are only listed by tag and title; `tracker TAG",
+        "show` shows the rest.",
         "",
-    ]
-    for stamp, tag, title, item_directory in ordered[:limit]:
-        summary: str = context_summary(item_directory) or "(no summary)"
-        lines.append(f"- `{tag}` {title} (closed {local_time(stamp)[:10]}):")
-        lines += [f"  {line}" if line else "" for line in summary.split("\n")]
-    if ordered[limit:]:
-        lines += ["", "Older closed items:", ""]
-        lines += [f"- `{tag}` {title}" for _, tag, title, _ in ordered[limit:]]
+    ] + [f"- `{tag}` {title}" for tag, title in older]
     try:
-        if not closed:
-            closed_path.unlink(missing_ok=True)
-        else:
+        if older:
             write_file(closed_path, "\n".join(lines) + "\n")
+        else:
+            closed_path.unlink(missing_ok=True)
     except OSError as error:
         return f"Unable to write '{closed_path}': {error}"
     return ""
