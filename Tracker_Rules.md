@@ -21,10 +21,18 @@ The `create` command (e.g. `tracker TASKS create 1.2.3 New Task`, or
    `open`, `reference`, `suspend` and `close` commands (e.g.
    `tracker t close 2`), never by editing this file.
 
-Each item has a tag (e.g. `dbzib` for "Division by Zero is Bad"), shown by
-`tracker t ls`.  Use the tag, in back quotes, to refer to an item in
-Markdown text.  Renaming an item can change its tag, in which case Claude
-updates every reference to the old tag in the same pass.
+Each item has a tag (e.g. `I.dbzib` for "Division by Zero is Bad" in
+`ISSUES/`), shown by `tracker t ls`.  Use the tag, in back quotes, to refer
+to an item in Markdown text and commit messages; never use item numbers,
+which change when items are deleted or moved.  Commands accept a tag
+wherever they take a number (e.g. `tracker t close T.fbm`).  Renaming an
+item can change its tag, in which case Claude updates every reference to
+the old tag in the same pass.
+
+Item numbers never have gaps.  `delete` is permanent: it refuses an item
+with children unless given `-r` (which asks first), and renumbers the
+later items.  Never run `delete` (or other changing commands) on the real
+items just to see what happens; try it in a scratch directory.
 
 When priority is enabled for a collection (e.g. `tracker i enable
 priority`, as it is for `ISSUES/`), items may have a priority set with

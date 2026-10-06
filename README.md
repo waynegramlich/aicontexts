@@ -17,14 +17,20 @@ with the following information:
 * Title:
   A short one line description of the item (e.g. `Initialization Fails`.)
 * Number:
-  A unique hierarchical number (e.g. `1.2.3`) used for sorting.
+  A unique hierarchical number (e.g. `1.2.3`) giving the Item's place in
+  the tree.  There are never gaps: if `1.3` exists, so do `1.1` and
+  `1.2`.  Numbers change as Items are deleted (and, later, moved), so
+  they are never used in text; tags are.
 * Tag:
-  A short name made from the first letter of each word of the Title in
-  lower case, ignoring "a", "an", "of" and "the" (e.g. `Division by Zero
-  is Bad` is `dbzib`.)  A tag is unique within its collection; when it
-  would clash, the newer Item gets the lowest free number added (e.g.
-  `cde2`.)  A tag never changes on its own, since tags show up in commit
-  messages and the like.  Tags are meant for referring to Items in text.
+  A short name: the capitalized first letter of the collection and a
+  period, then the first letter of each word of the Title in lower case,
+  ignoring "a", "an", "of" and "the" (e.g. `Division by Zero is Bad` in
+  `ISSUES/` is `I.dbzib`.)  Collections must start with different
+  letters.  A tag is unique within its collection; when it would clash,
+  the newer Item gets the lowest free number added (e.g. `I.cde2`.)  A
+  tag never changes on its own, since tags show up in commit messages and
+  the like.  Text refers to Items by tag, never by number, and commands
+  accept a tag wherever they take a Number.
 * Priority:
   An optional level: 0 (catastrophic), 1 (high), 2 (medium) or 3 (low).
   Priority is enabled per collection (`tracker i enable priority`); then

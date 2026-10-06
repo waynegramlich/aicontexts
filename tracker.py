@@ -30,7 +30,9 @@ current directory) and is named exactly as typed.
 Commands:
   create NUMBER TITLE...  Create an item (NUMBER is like 1.2.3)
   rename NUMBER TITLE...  Change the title of an item
-  delete [-r] NUMBER      Delete an item and all of its files
+  delete [-r] NUMBER      Delete an item and all of its files; with -r,
+                          after asking, its children too.  NUMBER may be
+                          a range of siblings, like 1.2.5-6
   list [-l] [NUMBER]      List all items, or NUMBER and its children
   ls [-l] [NUMBER]        Same as list
   pending [-r] NUMBER     Set the item state to Pending
@@ -48,14 +50,21 @@ Options:
   -r, --recursive         Also apply to all of the child items
   -l, --long              Also list the created and updated times
 
+Items are numbered without gaps: if 1.3 exists, so do 1.1 and 1.2.  An
+item can only be created at the next free number of its level, and
+deleting an item moves its later siblings (and their children) up one.
+
 Item states are: Pending, Open, Reference, Suspended, Closed
 New items are created Pending.  Open items are being worked on.  Reference
 items are not, but like Open items their Context.md is in Startup.md.
 
-Each item has a tag: the first letter of each word of its title in lower
-case, ignoring "a", "an", "of" and "the" (e.g. "Division by Zero is Bad"
-is `dbzib`).  When a tag is already used in the collection, the new item
-gets the lowest free number added (e.g. `cde2`).
+Each item has a tag: the capitalized first letter of its collection and a
+period, then the first letter of each word of its title in lower case,
+ignoring "a", "an", "of" and "the" (e.g. "Division by Zero is Bad" in
+ISSUES is `I.dbzib`).  When a tag is already used in the collection, the
+new item gets the lowest free number added (e.g. `I.cde2`).  Collections
+must start with different letters.  A tag (with or without its prefix,
+in any case) may be used wherever an item NUMBER is expected.
 
 When priority is enabled for a collection, its items are listed by
 priority first (0 to 3, then none) and the priority is shown."""
@@ -303,6 +312,16 @@ def parse_priority(level: str) -> int | None | str:
     )
 
 
+def number_text(name: tuple[int, ...]) -> str:
+    """Return `name` as period separated numbers, like "1.2.3"."""
+    return ".".join(str(part) for part in name)
+
+
+def tag_prefix(collection_name: str) -> str:
+    """Return the tag prefix of a collection, like "T." for "TASKS"."""
+    return f"{collection_name[:1].upper()}."
+
+
 def parse_number(number: str) -> tuple[int, ...] | str:
     """Convert a number like "1.2.3" into a name like (1, 2, 3).
 
@@ -346,7 +365,9 @@ def clean_title(title: str) -> str:
 
 
 def parse_recursive(
-    command: str, arguments: list[str]
+    command: str,
+    arguments: list[str],
+    resolve: Callable[[str], tuple[int, ...] | str] = parse_number,
 ) -> tuple[tuple[int, ...], bool] | str:
     """Parse the `[-r] NUMBER` arguments of `command`.
 
@@ -361,7 +382,7 @@ def parse_recursive(
             numbers.append(argument)
     if len(numbers) != 1:
         return f"Usage: tracker COLLECTION {command} [-r] NUMBER"
-    name: tuple[int, ...] | str = parse_number(numbers[0])
+    name: tuple[int, ...] | str = resolve(numbers[0])
     if isinstance(name, str):
         return name
     return name, recursive
@@ -459,6 +480,35 @@ class Items:
             self.load_items()
 
     @property
+    def prefix(self) -> str:
+        """Return the tag prefix of this collection, like "T."."""
+        return tag_prefix(self.items_directory.name)
+
+    def resolve(self, word: str) -> tuple[int, ...] | str:
+        """Return the name of the item that `word` gives.
+
+        `word` is an item number like "1.2.3", or a tag with or without
+        the collection prefix, in any case (e.g. "T.fbm" or "fbm").
+        Returns an error string if `word` is neither.
+        """
+        if word and all(
+            character.isdecimal() or character == "." for character in word
+        ):
+            return parse_number(word)
+        folded: str = word.casefold()
+        for item in self.items.values():
+            if item.tag and folded in (
+                item.tag.casefold(),
+                f"{self.prefix}{item.tag}".casefold(),
+            ):
+                return item.name
+        return f"Invalid item number or tag '{word}'"
+
+    def show(self, items: list[Item], long: bool = False) -> None:
+        """Print `items` with this collection's tag prefix and priority."""
+        print_items(items, long, self.priority_enabled, self.prefix)
+
+    @property
     def priority_enabled(self) -> bool:
         """Return whether priority is enabled for this collection."""
         return self.settings.get("priority") is True
@@ -523,6 +573,118 @@ class Items:
             else:
                 self.directories[name] = item_directory
         self.add_missing_tags()
+        self.fix_gaps()
+
+    def missing_names(self) -> list[tuple[int, ...]]:
+        """Return the sorted names that are missing from the numbering.
+
+        These are the absent parents of items and the absent earlier
+        siblings of items and of their parents.
+        """
+        missing: set[tuple[int, ...]] = set()
+        for name in self.items:
+            for length in range(1, len(name) + 1):
+                prefix: tuple[int, ...] = name[:length]
+                missing.update(
+                    prefix[:-1] + (part,)
+                    for part in range(1, prefix[-1] + 1)
+                    if prefix[:-1] + (part,) not in self.items
+                )
+        return sorted(missing)
+
+    def gap_free_names(self) -> dict[tuple[int, ...], tuple[int, ...]]:
+        """Return the new name of each item whose name must change.
+
+        Items keep their order.  An item whose parent is missing becomes
+        a child of its nearest existing ancestor.
+        """
+        new_names: dict[tuple[int, ...], tuple[int, ...]] = {}
+        counts: dict[tuple[int, ...], int] = {}
+        for name in sorted(self.items):
+            parent: tuple[int, ...] = next(
+                (
+                    name[:length]
+                    for length in range(len(name) - 1, 0, -1)
+                    if name[:length] in self.items
+                ),
+                (),
+            )
+            new_parent: tuple[int, ...] = new_names[parent] if parent else ()
+            counts[new_parent] = counts.get(new_parent, 0) + 1
+            new_names[name] = new_parent + (counts[new_parent],)
+        return {old: new for old, new in new_names.items() if old != new}
+
+    def renumber(
+        self, new_names: dict[tuple[int, ...], tuple[int, ...]]
+    ) -> str:
+        """Give the items in `new_names` their new names.
+
+        Each item directory is renamed (via a temporary name, so that the
+        new names can not collide with the old ones) and the heading of
+        its `Details.md` is rewritten.  Returns an empty string on
+        success, or an error string on failure.
+        """
+        moving: list[tuple[Item, Path]] = []
+        try:
+            for index, old in enumerate(sorted(new_names)):
+                temporary: Path = self.items_directory / f".renumber_{index}"
+                self.directories[old].rename(temporary)
+                moving.append((self.items[old], temporary))
+            for item, temporary in moving:
+                old_number: str = item.number
+                new: tuple[int, ...] = new_names[item.name]
+                title_part: str = self.directories[item.name].name.partition(
+                    "_"
+                )[2]
+                new_directory: Path = (
+                    self.items_directory / f"{number_text(new)}_{title_part}"
+                )
+                temporary.rename(new_directory)
+                del self.items[item.name]
+                del self.directories[item.name]
+                item.name = new
+                self.items[new] = item
+                self.directories[new] = new_directory
+                details_path: Path = new_directory / "Details.md"
+                details: str = read_file(details_path)
+                prefix: str = f"# {old_number} "
+                if details.startswith(prefix):
+                    write_file(
+                        details_path,
+                        f"# {number_text(new)} {details[len(prefix):]}",
+                    )
+        except OSError as error:
+            return (
+                f"Unable to renumber items in '{self.items_directory}': "
+                f"{error}"
+            )
+        return ""
+
+    def fix_gaps(self) -> None:
+        """Renumber the items if there are gaps, reporting it to stderr.
+
+        Gaps only appear when item directories are removed by hand.
+        """
+        new_names: dict[tuple[int, ...], tuple[int, ...]] = (
+            self.gap_free_names()
+        )
+        if not new_names:
+            return
+        missing: str = ", ".join(
+            number_text(name) for name in self.missing_names()
+        )
+        changes: str = ", ".join(
+            f"{number_text(old)} -> {number_text(new)}"
+            for old, new in sorted(new_names.items())
+        )
+        print(
+            f"Gaps found in '{self.items_directory}' ({missing} missing); "
+            f"renumbered {changes}",
+            file=sys.stderr,
+        )
+        error: str = self.renumber(new_names)
+        if error:
+            print(error, file=sys.stderr)
 
     def add_missing_tags(self) -> None:
         """Give a unique tag to every item that does not have one.
@@ -577,6 +739,24 @@ class Items:
         }
         if name in self.items or number in sub_directories:
             return f"Item '{number}' already exists"
+        if len(name) > 1 and name[:-1] not in self.items:
+            return (
+                f"Item '{number}' can not be created: "
+                f"{number_text(name[:-1])} does not exist"
+            )
+        free: tuple[int, ...] = name[:-1] + (
+            sum(
+                1
+                for other in self.items
+                if len(other) == len(name) and other[:-1] == name[:-1]
+            )
+            + 1,
+        )
+        if name != free:
+            return (
+                f"Item '{number}' would leave a gap; the next free number "
+                f"is {number_text(free)}"
+            )
         title = title.strip()
         cleaned_title: str = clean_title(title)
         if not cleaned_title:
@@ -675,18 +855,72 @@ class Items:
         self.directories[name] = new_directory
         return item
 
-    def delete_item(
-        self, name: tuple[int, ...], recursive: bool = False
-    ) -> list[Item] | str:
-        """Delete item `name`, and its children if `recursive`.
+    def resolve_range(self, word: str) -> list[tuple[int, ...]] | str:
+        """Return the names that `word` gives.
 
-        Each item directory is removed along with everything in it.
-        Returns the deleted items, or an error string on failure.
+        `word` is a number or tag (see `resolve()`), or a range of
+        siblings like "1.2.5-6".  Every item in a range must exist.
+        Returns an error string if `word` is not valid.
         """
-        selected: list[Item] | str = self.select_items(name, recursive)
-        if isinstance(selected, str):
-            return selected
-        for item in selected:
+        if "-" not in word:
+            name: tuple[int, ...] | str = self.resolve(word)
+            return name if isinstance(name, str) else [name]
+        first_text, _, last_text = word.rpartition("-")
+        first: tuple[int, ...] | str = parse_number(first_text)
+        if isinstance(first, str):
+            return first
+        if not last_text.isdecimal() or int(last_text) <= first[-1]:
+            return (
+                f"Invalid range '{word}': it must be like 1.2.5-6, with the "
+                "last number greater than the one before the '-'"
+            )
+        names: list[tuple[int, ...]] = [
+            first[:-1] + (part,)
+            for part in range(first[-1], int(last_text) + 1)
+        ]
+        for name in names:
+            if name not in self.items:
+                return f"Item '{number_text(name)}' does not exist"
+        return names
+
+    def delete_items(
+        self,
+        names: list[tuple[int, ...]],
+        recursive: bool = False,
+        ask: Callable[[str], str] = input,
+    ) -> tuple[list[Item], dict[str, Item]] | str:
+        """Delete the items `names`, and their children if `recursive`.
+
+        An item with children is only deleted if `recursive`, and then only
+        if `ask` gets a yes answer.  Each item directory is removed along
+        with everything in it, and the later items are renumbered so that
+        there are no gaps.  Returns the deleted items and the renumbered
+        items keyed by their old numbers, or an error string on failure.
+        """
+        for name in names:
+            if name not in self.items:
+                return f"Item '{number_text(name)}' does not exist"
+        doomed: list[Item] = [
+            item for name in names for item in self.list_items(name)
+        ]
+        if not recursive:
+            for name in names:
+                if len(self.list_items(name)) > 1:
+                    return (
+                        f"Item '{number_text(name)}' has children; use -r "
+                        "to delete them too"
+                    )
+        else:
+            try:
+                answer: str = ask(
+                    f"Do you really want to delete {len(doomed)} items "
+                    "Yes(y) or No(n). "
+                )
+            except EOFError:
+                answer = ""
+            if answer.strip().casefold() not in ("y", "yes"):
+                return "Nothing deleted"
+        for item in doomed:
             item_directory: Path = self.directories[item.name]
             try:
                 shutil.rmtree(item_directory)
@@ -694,7 +928,16 @@ class Items:
                 return f"Unable to delete '{item_directory}': {error}"
             del self.items[item.name]
             del self.directories[item.name]
-        return selected
+        new_names: dict[tuple[int, ...], tuple[int, ...]] = (
+            self.gap_free_names()
+        )
+        renumbered: dict[str, Item] = {
+            number_text(old): self.items[old] for old in sorted(new_names)
+        }
+        failure: str = self.renumber(new_names)
+        if failure:
+            return failure
+        return doomed, renumbered
 
     def set_state(
         self, name: tuple[int, ...], state: str, recursive: bool = False
@@ -771,7 +1014,7 @@ class Items:
             )
         if len(arguments) != 2:
             return "Usage: tracker COLLECTION priority NUMBER LEVEL"
-        number: tuple[int, ...] | str = parse_number(arguments[0])
+        number: tuple[int, ...] | str = self.resolve(arguments[0])
         if isinstance(number, str):
             return number
         priority: int | None | str = parse_priority(arguments[1])
@@ -780,7 +1023,7 @@ class Items:
         changed: Item | str = self.set_priority(number, priority)
         if isinstance(changed, str):
             return changed
-        print_items([changed], priority=self.priority_enabled)
+        self.show([changed])
         return ""
 
     def create_command(self, arguments: list[str]) -> str:
@@ -810,7 +1053,7 @@ class Items:
         if len(numbers) > 1:
             return "Usage: tracker COLLECTION list [-l] [NUMBER]"
         name: tuple[int, ...] | str = (
-            parse_number(numbers[0]) if numbers else ()
+            self.resolve(numbers[0]) if numbers else ()
         )
         if isinstance(name, str):
             return name
@@ -823,7 +1066,7 @@ class Items:
                     item.name,
                 )
             )
-        print_items(listed, long, self.priority_enabled)
+        self.show(listed, long)
         return ""
 
     def state_command(self, command: str, arguments: list[str]) -> str:
@@ -832,7 +1075,7 @@ class Items:
         Returns an empty string on success, or an error string on failure.
         """
         parsed: tuple[tuple[int, ...], bool] | str = parse_recursive(
-            command, arguments
+            command, arguments, self.resolve
         )
         if isinstance(parsed, str):
             return parsed
@@ -847,7 +1090,7 @@ class Items:
         changed: list[Item] | str = self.set_state(name, state, recursive)
         if isinstance(changed, str):
             return changed
-        print_items(changed, priority=self.priority_enabled)
+        self.show(changed)
         return ""
 
     def rename_command(self, arguments: list[str]) -> str:
@@ -857,29 +1100,48 @@ class Items:
         """
         if len(arguments) < 2:
             return "Usage: tracker COLLECTION rename NUMBER TITLE..."
-        name: tuple[int, ...] | str = parse_number(arguments[0])
+        name: tuple[int, ...] | str = self.resolve(arguments[0])
         if isinstance(name, str):
             return name
         renamed: Item | str = self.rename_item(name, " ".join(arguments[1:]))
         if isinstance(renamed, str):
             return renamed
-        print_items([renamed], priority=self.priority_enabled)
+        self.show([renamed])
         return ""
 
-    def delete_command(self, arguments: list[str]) -> str:
-        """Run `delete [-r] NUMBER`.
+    def delete_command(
+        self, arguments: list[str], ask: Callable[[str], str] = input
+    ) -> str:
+        """Run `delete [-r] NUMBER`, where NUMBER may be a range.
 
-        Returns an empty string on success, or an error string on failure.
+        Prints the deleted items and the renumbered ones.  Returns an
+        empty string on success, or an error string on failure.
         """
-        parsed: tuple[tuple[int, ...], bool] | str = parse_recursive(
-            "delete", arguments
+        recursive: bool = False
+        words: list[str] = []
+        for argument in arguments:
+            if argument in ("-r", "--recursive"):
+                recursive = True
+            else:
+                words.append(argument)
+        if len(words) != 1:
+            return "Usage: tracker COLLECTION delete [-r] NUMBER"
+        names: list[tuple[int, ...]] | str = self.resolve_range(words[0])
+        if isinstance(names, str):
+            return names
+        result: tuple[list[Item], dict[str, Item]] | str = self.delete_items(
+            names, recursive, ask
         )
-        if isinstance(parsed, str):
-            return parsed
-        deleted: list[Item] | str = self.delete_item(*parsed)
-        if isinstance(deleted, str):
-            return deleted
-        print_items(deleted, priority=self.priority_enabled)
+        if isinstance(result, str):
+            return result
+        deleted, renumbered = result
+        print("Deleted:")
+        self.show(deleted)
+        if renumbered:
+            print("Renumbered (old number first):")
+            for old_number, item in renumbered.items():
+                print(f"{old_number} -> ", end="")
+                self.show([item])
         return ""
 
     @staticmethod
@@ -904,6 +1166,7 @@ class Items:
             Items._test_items(check, root / "TASKS")
             Items._test_reload(check, root / "TASKS")
             Items._test_rename_delete(check, root / "rename_delete")
+            Items._test_numbering(check, root / "numbering")
             Items._test_errors(check, root / "errors")
         # The commands search upward for collections, so they are tested
         # away from the collections made by the other tests.
@@ -978,15 +1241,22 @@ class Items:
         output: io.StringIO = io.StringIO()
         with contextlib.redirect_stdout(output):
             print_items(printed)
-            print_items(printed, priority=True)
+            print_items(printed, priority=True, prefix="I.")
         check(
             output.getvalue()
             == "1    Pending    cde  Can Dogs Eat\n"
             "1.2  Reference  x    X\n"
-            "1    Pending    0  cde  Can Dogs Eat\n"
-            "1.2  Reference  -  x    X\n",
+            "1    Pending    0  I.cde  Can Dogs Eat\n"
+            "1.2  Reference  -  I.x    X\n",
             "print_items shows the tag, and the priority if asked",
         )
+        for collection_name, prefix in (
+            ("TASKS", "T."), ("issues", "I."), ("2026", "2.")
+        ):
+            check(
+                tag_prefix(collection_name) == prefix,
+                f"tag_prefix({collection_name!r})",
+            )
         check(utc_stamp(0) == "1970-01-01T00:00:00Z", "utc_stamp")
         epoch: datetime = datetime.fromtimestamp(0, UTC).astimezone()
         check(
@@ -1045,17 +1315,17 @@ class Items:
             read_file(top / "Details.md") == "# 1 top item\n",
             "Details.md file",
         )
-        items.create_item("1.2", "fix the-bug, (now)!")
+        items.create_item("1.1", "fix the-bug, (now)!")
         check(
-            (directory / "1.2_Fix_the_bug_now").is_dir(),
+            (directory / "1.1_Fix_the_bug_now").is_dir(),
             "directory name is cleaned up",
         )
-        # Created out of order to test that listing sorts numerically.
-        for number in ("2", "1.20", "1.2.10", "1.2.3"):
+        for number in ("2", "1.2", "1.1.1", "1.1.2"):
             items.create_item(number, f"item {number}")
         for number, title in (
-            ("1.2", "duplicate"), ("01.2", "duplicate"),
-            ("x", "bad"), ("3", "  ...!! "), ("4", ""),
+            ("1.1", "duplicate"), ("01.1", "duplicate"),
+            ("x", "bad"), ("3", "  ...!! "), ("3", ""), ("4", "gap"),
+            ("1.4", "gap"), ("1.1.4", "gap"), ("3.1", "no parent"),
         ):
             check(
                 isinstance(items.create_item(number, title), str),
@@ -1064,6 +1334,11 @@ class Items:
         check(
             not any(directory.glob("3_*")) and not any(directory.glob("4_*")),
             "rejected items have no directory",
+        )
+        check(
+            "the next free number is 1.3" in str(items.create_item("1.4", "x"))
+            and "3 does not exist" in str(items.create_item("3.1", "x")),
+            "create explains a gap",
         )
         items.set_state((1,), "Open", True)
         items.set_state((2,), "Open")
@@ -1082,40 +1357,40 @@ class Items:
 
         check(
             numbers(items.list_items())
-            == ["1", "1.2", "1.2.3", "1.2.10", "1.20", "2"],
-            "list all items in numeric order",
+            == ["1", "1.1", "1.1.1", "1.1.2", "1.2", "2"],
+            "list all items in order",
         )
         check(
-            numbers(items.list_items((1, 2)))
-            == ["1.2", "1.2.3", "1.2.10"],
-            "list 1.2 and its children",
+            numbers(items.list_items((1, 1)))
+            == ["1.1", "1.1.1", "1.1.2"],
+            "list 1.1 and its children",
         )
         check(items.list_items((9,)) == [], "list with no matches")
         check(
-            numbers(items.set_state((1, 2), "Closed")) == ["1.2"],
-            "close 1.2",
+            numbers(items.set_state((1, 1), "Closed")) == ["1.1"],
+            "close 1.1",
         )
         check(
-            read_item(directory / "1.2_Fix_the_bug_now")["state"]
+            read_item(directory / "1.1_Fix_the_bug_now")["state"]
             == "Closed",
-            "close 1.2 writes item file",
+            "close 1.1 writes item file",
         )
-        history: object = read_item(directory / "1.2_Fix_the_bug_now")[
+        history: object = read_item(directory / "1.1_Fix_the_bug_now")[
             "history"
         ]
         check(
             isinstance(history, list)
             and [change["state"] for change in history]
             == ["Pending", "Open", "Closed"],
-            "history of 1.2",
+            "history of 1.1",
         )
-        check(items.items[(1, 2, 3)].state == "Open", "1.2.3 still Open")
+        check(items.items[(1, 1, 1)].state == "Open", "1.1.1 still Open")
         check(
-            numbers(items.set_state((1, 2), "Suspended", True))
-            == ["1.2", "1.2.3", "1.2.10"],
-            "suspend -r 1.2",
+            numbers(items.set_state((1, 1), "Suspended", True))
+            == ["1.1", "1.1.1", "1.1.2"],
+            "suspend -r 1.1",
         )
-        check(items.items[(1, 20)].state == "Open", "1.20 still Open")
+        check(items.items[(1, 2)].state == "Open", "1.2 still Open")
         for name, state, recursive in (
             ((9,), "Closed", False), ((9,), "Closed", True),
             ((1,), "Done", False),
@@ -1138,10 +1413,10 @@ class Items:
         check(
             read_file(directory / "Startup.md")
             == "@1_Top_item/Details.md\n@1_Top_item/Context.md\n"
-            "@1.2_Fix_the_bug_now/Details.md\n"
-            "@1.2.3_Item_1.2.3/Details.md\n"
-            "@1.2.10_Item_1.2.10/Details.md\n"
-            "@1.20_Item_1.20/Details.md\n@1.20_Item_1.20/Context.md\n"
+            "@1.1_Fix_the_bug_now/Details.md\n"
+            "@1.1.1_Item_1.1.1/Details.md\n"
+            "@1.1.2_Item_1.1.2/Details.md\n"
+            "@1.2_Item_1.2/Details.md\n@1.2_Item_1.2/Context.md\n"
             "@2_Item_2/Details.md\n@2_Item_2/Context.md\n"
             "@3_Later/Details.md\n"
             "@../ISSUES/1_Crash/Details.md\n"
@@ -1163,20 +1438,20 @@ class Items:
             (directory / directory_name).mkdir()
             write_file(directory / directory_name / ITEM_FILE, text)
             write_file(directory / directory_name / "Details.md", "# x\n")
-        old_format: Path = directory / "8_Old_format"
+        old_format: Path = directory / "4_Old_format"
         old_format.mkdir()
         write_file(old_format / OLD_STATUS_FILE, "Suspended\n")
         os.utime(old_format / OLD_STATUS_FILE, (0, 0))
-        write_file(old_format / "Details.md", "# 8 Old format\n")
+        write_file(old_format / "Details.md", "# 4 Old format\n")
         errors: io.StringIO = io.StringIO()
         with contextlib.redirect_stderr(errors):
             items: Items = Items(directory)
         check(errors.getvalue().count("Skipping") == 4, "skip bad items")
         check(len(items.items) == 8, "reload 8 items")
         check(
-            items.items[(8,)].state == "Suspended"
+            items.items[(4,)].state == "Suspended"
             and not (old_format / OLD_STATUS_FILE).exists()
-            and items.items[(8,)].created == "1970-01-01T00:00:00Z"
+            and items.items[(4,)].created == "1970-01-01T00:00:00Z"
             and read_item(old_format)
             == {
                 **new_metadata("Suspended", "1970-01-01T00:00:00Z"),
@@ -1187,28 +1462,28 @@ class Items:
         write_item(
             old_format, {"state": "Suspended", "tags": ["x"], "updated": "x"}
         )
-        items.set_state((8,), "Closed")
+        items.set_state((4,), "Closed")
         metadata: dict[str, object] = read_item(old_format)
         check(
             metadata["state"] == "Closed" and metadata["tags"] == ["x"],
             "set_state keeps other item metadata",
         )
         check(
-            metadata["updated"] == items.items[(8,)].updated != "x",
+            metadata["updated"] == items.items[(4,)].updated != "x",
             "set_state sets the updated time",
         )
-        items.set_state((8,), "Closed")
+        items.set_state((4,), "Closed")
         check(
             read_item(old_format) == metadata,
             "set_state to the same state changes nothing",
         )
         write_file(old_format / ITEM_FILE, "[]")
         check(
-            "Unable to write" in str(items.set_state((8,), "Open")),
+            "Unable to write" in str(items.set_state((4,), "Open")),
             "set_state with a bad item file",
         )
         check(
-            items.items[(1, 2)].title == "fix the-bug, (now)!",
+            items.items[(1, 1)].title == "fix the-bug, (now)!",
             "reload title from Details.md",
         )
         check(
@@ -1223,7 +1498,7 @@ class Items:
 
     @staticmethod
     def _test_rename_delete(check: Check, directory: Path) -> None:
-        """Test `rename_item()` and `delete_item()`."""
+        """Test `rename_item()` and `delete_items()`."""
         items: Items = Items(directory)
         for number, title in (
             ("1", "One"), ("1.1", "Child"), ("2", "Two")
@@ -1253,30 +1528,29 @@ class Items:
             "rename sets the updated time",
         )
         for number, title in (
-            ("5", "Can Dogs Eat"), ("6", "Caffeine Drink Elixir"),
-            ("7", "Hot Tub"),
+            ("3", "Can Dogs Eat"), ("4", "Caffeine Drink Elixir"),
+            ("5", "Hot Tub"),
         ):
             items.create_item(number, title)
         check(
-            [items.items[(number,)].tag for number in (5, 6, 7)]
+            [items.items[(number,)].tag for number in (3, 4, 5)]
             == ["cde", "cde2", "ht"],
             "a clashing tag gets a number",
         )
-        items.rename_item((6,), "Caffeine Drinks Everywhere")
-        check(items.items[(6,)].tag == "cde2", "rename keeps an equal tag")
-        items.rename_item((5,), "Hot Tea")
+        items.rename_item((4,), "Caffeine Drinks Everywhere")
+        check(items.items[(4,)].tag == "cde2", "rename keeps an equal tag")
+        items.rename_item((3,), "Hot Tea")
         check(
-            items.items[(5,)].tag == "ht2"
-            and read_item(directory / "5_Hot_Tea")["tag"] == "ht2",
+            items.items[(3,)].tag == "ht2"
+            and read_item(directory / "3_Hot_Tea")["tag"] == "ht2",
             "rename makes a new unique tag",
         )
         check(
-            [item.tag for item in Items(directory).list_items((5,))]
+            [item.tag for item in Items(directory).list_items((3,))]
             == ["ht2"],
             "reload a tag",
         )
-        for key in ((5,), (6,), (7,)):
-            items.delete_item(key)
+        items.delete_items([(3,), (4,), (5,)])
         write_file(directory / "2_Two" / "Details.md", "Notes\n")
         items.rename_item((2,), "Two")
         check(
@@ -1295,33 +1569,57 @@ class Items:
             Items(directory).items[(1,)].title == "Uno, again",
             "reload a renamed item",
         )
-        deleted: list[Item] | str = items.delete_item((1,))
         check(
-            not isinstance(deleted, str)
-            and [item.number for item in deleted] == ["1"]
-            and not (directory / "1_Uno_again").exists()
-            and (directory / "1.1_Child").is_dir(),
-            "delete 1 keeps 1.1",
+            "has children" in str(items.delete_items([(1,)])),
+            "delete refuses an item with children",
         )
-        items.create_item("1", "One")
-        deleted = items.delete_item((1,), True)
         check(
-            not isinstance(deleted, str)
-            and [item.number for item in deleted] == ["1", "1.1"]
-            and not any(directory.glob("1*")),
-            "delete -r 1",
+            items.delete_items([(1,)], True, lambda question: "n")
+            == "Nothing deleted"
+            and (directory / "1_Uno_again").is_dir(),
+            "delete -r asks first",
+        )
+        questions: list[str] = []
+
+        def yes(question: str) -> str:
+            questions.append(question)
+            return "y"
+
+        result: tuple[list[Item], dict[str, Item]] | str = (
+            items.delete_items([(1,)], True, yes)
+        )
+        check(
+            not isinstance(result, str)
+            and [item.number for item in result[0]] == ["1", "1.1"]
+            and list(result[1]) == ["2"]
+            and result[1]["2"].number == "1"
+            and questions
+            == ["Do you really want to delete 2 items Yes(y) or No(n). "]
+            and not (directory / "1_Uno_again").exists()
+            and not (directory / "1.1_Child").exists()
+            and read_file(directory / "1_Two" / "Details.md")
+            == "# 1 Two\nNotes\n",
+            "delete -r 1 renumbers 2 to 1",
         )
         for recursive in (False, True):
             check(
-                isinstance(items.delete_item((9,), recursive), str),
+                isinstance(items.delete_items([(9,)], recursive), str),
                 f"reject delete 9 recursive={recursive}",
             )
-        details_path: Path = directory / "2_Two" / "Details.md"
+        details_path: Path = directory / "1_Two" / "Details.md"
         details_path.unlink()
         details_path.mkdir()
         check(
-            "Unable to rename" in str(items.rename_item((2,), "Deux")),
+            "Unable to rename" in str(items.rename_item((1,), "Deux")),
             "rename failure",
+        )
+        items.create_item("2", "Three")
+        (directory / "2_Three" / "Details.md").unlink()
+        (directory / "2_Three" / "Details.md").mkdir()
+        check(
+            "Unable to renumber" in str(items.delete_items([(1,)]))
+            and items.directories[(1,)] == directory / "1_Three",
+            "renumber failure",
         )
         if os.geteuid() == 0:
             # Permissions are not enforced for root.
@@ -1329,11 +1627,98 @@ class Items:
         directory.chmod(0o500)
         try:
             check(
-                "Unable to delete" in str(items.delete_item((2,))),
+                "Unable to delete" in str(items.delete_items([(1,)])),
                 "delete failure",
             )
         finally:
             directory.chmod(0o700)
+
+    @staticmethod
+    def _test_numbering(check: Check, directory: Path) -> None:
+        """Test numeric order, ranges, renumbering and fixing gaps."""
+        items: Items = Items(directory)
+        for part in range(1, 12):
+            items.create_item(str(part), f"Top {part}")
+        check(
+            [item.number for item in items.list_items()][8:]
+            == ["9", "10", "11"],
+            "list in numeric order",
+        )
+        items.delete_items([(part,) for part in range(4, 12)])
+        for number, title in (
+            ("1.1", "B"), ("1.2", "C"), ("1.2.1", "D"), ("1.3", "E"),
+            ("1.3.1", "F"), ("1.4", "G"), ("1.5", "H"),
+        ):
+            items.create_item(number, title)
+
+        def tree() -> list[str]:
+            return [
+                f"{item.number} {item.title}"
+                for item in Items(directory).list_items((1,))
+            ]
+
+        result: tuple[list[Item], dict[str, Item]] | str = (
+            items.delete_items([(1, 1)])
+        )
+        check(
+            not isinstance(result, str)
+            and [item.title for item in result[0]] == ["B"]
+            and {old: item.number for old, item in result[1].items()}
+            == {
+                "1.2": "1.1", "1.2.1": "1.1.1", "1.3": "1.2",
+                "1.3.1": "1.2.1", "1.4": "1.3", "1.5": "1.4",
+            }
+            and tree()
+            == [
+                "1 Top 1", "1.1 C", "1.1.1 D", "1.2 E", "1.2.1 F", "1.3 G",
+                "1.4 H",
+            ]
+            and read_file(directory / "1.2.1_F" / "Details.md")
+            == "# 1.2.1 F\n",
+            "delete 1.1 renumbers the later items and their children",
+        )
+        for word, message in (
+            ("1.3-2", "Invalid range"), ("1.3-x", "Invalid range"),
+            ("x-4", "Invalid item number"), ("1.3-9", "'1.5' does not exist"),
+        ):
+            check(
+                message in str(items.resolve_range(word)),
+                f"reject range {word!r}",
+            )
+        check(
+            items.resolve_range("N.e") == [(1, 2)]
+            and items.resolve_range("1.3-4") == [(1, 3), (1, 4)],
+            "resolve a tag and a range",
+        )
+        items.delete_items([(1, 3), (1, 4)])
+        check(
+            tree() == ["1 Top 1", "1.1 C", "1.1.1 D", "1.2 E", "1.2.1 F"],
+            "delete a range",
+        )
+        items.create_item("1.3", "G")
+        shutil.rmtree(directory / "1.1_C")
+        errors: io.StringIO = io.StringIO()
+        with contextlib.redirect_stderr(errors):
+            check(
+                tree() == ["1 Top 1", "1.1 D", "1.2 E", "1.2.1 F", "1.3 G"],
+                "fix a gap made by hand",
+            )
+        check(
+            "(1.1 missing); renumbered 1.1.1 -> 1.1" in errors.getvalue(),
+            "report a gap made by hand",
+        )
+        if os.geteuid() == 0:
+            # Permissions are not enforced for root.
+            return  # pragma: no cover
+        shutil.rmtree(directory / "2_Top_2")
+        (directory / "3_Top_3" / "Details.md").chmod(0o400)
+        errors = io.StringIO()
+        with contextlib.redirect_stderr(errors):
+            Items(directory)
+        check(
+            "Unable to renumber" in errors.getvalue(),
+            "report a failure to fix a gap",
+        )
 
     @staticmethod
     def _test_commands(check: Check, directory: Path) -> None:
@@ -1399,23 +1784,23 @@ class Items:
                 ("", ("t", "pe", "1.1"), 0, "Pending"),
                 ("", ("t", "p", "1.1"), 1, "pending, priority"),
                 ("", ("t", "pr", "1", "1"), 1, "Priority is not enabled"),
-                ("", ("t", "ls"), 0, "Open       i "),
+                ("", ("t", "ls"), 0, "Open       T.i "),
                 ("", ("t", "en"), 1, "FEATURE is one of: priority"),
                 ("", ("t", "en", "x"), 1, "FEATURE is one of"),
                 ("", ("t", "en", "p", "q"), 1, "FEATURE is one of"),
                 ("", ("t", "en", "p"), 0, ""),
-                ("", ("t", "pr", "1.1", "0"), 0, "Pending    0  c  Child"),
-                ("", ("t", "ls"), 0, "0  c  Child\n1    Open       -  i  An"),
-                ("", ("t", "pr", "1", "1"), 0, "Open       1  i "),
-                ("", ("t", "pr", "1", "-"), 0, "Open       -  i "),
+                ("", ("t", "pr", "1.1", "0"), 0, "Pending    0  T.c  Child"),
+                ("", ("t", "ls"), 0, "0  T.c  Child\n1    Open       -  T.i"),
+                ("", ("t", "pr", "1", "1"), 0, "Open       1  T.i "),
+                ("", ("t", "pr", "1", "-"), 0, "Open       -  T.i "),
                 ("", ("t", "pr", "1", "4"), 1, "Invalid priority"),
                 ("", ("t", "pr", "1"), 1, "Usage"),
                 ("", ("t", "pr", "x", "1"), 1, "Invalid"),
                 ("", ("t", "pr", "9", "1"), 1, "does not exist"),
-                ("", ("t", "pr", "1.1", "-"), 0, "Pending    -  c  Child"),
-                ("", ("t", "ls"), 0, "-  i  An item\n1.1  Pending    -  c"),
+                ("", ("t", "pr", "1.1", "-"), 0, "Pending    -  T.c  Child"),
+                ("", ("t", "ls"), 0, "-  T.i  An item\n1.1  Pending    -"),
                 ("", ("t", "di", "pr"), 0, ""),
-                ("", ("t", "ls"), 0, "Open       i  An item\n1.1  Pending"),
+                ("", ("t", "ls"), 0, "Open       T.i  An item\n1.1  Pending"),
                 ("", ("t", "ref", "1.1"), 0, "Reference"),
                 ("", ("t", "open"), 1, "Usage"),
                 ("", ("t", "close", "9"), 1, "does not exist"),
@@ -1426,12 +1811,32 @@ class Items:
                 ("", ("t", "rename", "9", "Nine"), 1, "does not exist"),
                 ("", ("t", "create", "2", "Doomed"), 0, ""),
                 ("", ("t", "d", "2"), 1, "delete, disable"),
-                ("", ("t", "del", "2"), 0, "Doomed"),
+                ("", ("t", "create", "3", "Survivor"), 0, ""),
+                (
+                    "",
+                    ("t", "del", "2"),
+                    0,
+                    "Doomed\nRenumbered (old number first):\n"
+                    "3 -> 2  Pending    T.s  Survivor\n",
+                ),
+                ("", ("t", "del", "T.s"), 0, "Deleted:\n2  Pending"),
                 ("", ("t", "delete"), 1, "Usage"),
                 ("", ("t", "delete", "x"), 1, "Invalid"),
-                ("", ("t", "delete", "-r", "9"), 1, "No items match"),
+                ("", ("t", "delete", "-r", "9"), 1, "does not exist"),
+                ("", ("t", "delete", "1", "2"), 1, "Usage"),
+                ("", ("t", "delete", "1"), 1, "has children"),
+                ("", ("t", "delete", "-r", "1"), 1, "Nothing deleted"),
                 ("", ("i", "create", "1", "Crash"), 0, ""),
                 ("", ("I", "OPEN", "1"), 0, "Open"),
+                ("", ("i", "ls"), 0, "I.c  Crash"),
+                ("", ("t", "ls", "T.i"), 0, "T.i   An item\n1.1"),
+                ("", ("t", "cl", "t.I"), 0, "Closed     T.i "),
+                ("", ("t", "o", "i"), 0, "Open       T.i "),
+                ("", ("t", "o", "I.c"), 1, "Invalid item number or tag"),
+                ("", ("t", "ren", "T.nc", "Newer", "child"), 0, "T.nc "),
+                ("", ("t", "ren", "T.nc", "Old", "kid"), 0, "T.ok "),
+                ("", ("t", "ren", "t.OK", "New", "child"), 0, "T.nc "),
+                ("", ("t", "o", "1..2"), 1, "Invalid item number '1..2'"),
             ):
                 answers[:] = [answer] if answer else []
                 result: tuple[int, str] = run(*arguments)
@@ -1463,10 +1868,21 @@ class Items:
             check(run("t", "ls")[1].startswith("1  "), "search upward")
             answers[:] = ["y"]
             check(
-                run("Tools", "create")[0] == 0
-                and (directory / "Tools" / COLLECTION_FILE).is_file(),
+                run("Notes", "create")[0] == 0
+                and (directory / "Notes" / COLLECTION_FILE).is_file(),
                 "create a collection next to the others",
             )
+            answers[:] = ["y"]
+            code, text = run("tools", "create")
+            check(
+                code == 1
+                and "tag prefix 'T.', which 'TASKS' already has" in text
+                and not (directory / "tools").exists(),
+                "collections must have different tag prefixes",
+            )
+            # Only a collection made by hand can clash.
+            (directory / "Tools").mkdir()
+            write_file(directory / "Tools" / COLLECTION_FILE, "{}\n")
             code, text = run("t", "ls")
             check(
                 code == 1 and "more than one collection: TASKS, Tools" in text,
@@ -1618,6 +2034,19 @@ class Items:
         if path.exists():
             print(f"'{path}' already exists", file=sys.stderr)
             return 1
+        prefix: str = tag_prefix(name)
+        clashes: list[str] = [
+            directory.name
+            for directory in directories
+            if tag_prefix(directory.name) == prefix
+        ]
+        if clashes:
+            print(
+                f"Collection '{name}' would have the tag prefix '{prefix}', "
+                f"which '{clashes[0]}' already has",
+                file=sys.stderr,
+            )
+            return 1
         try:
             answer: str = ask(f"Create tracker directory '{path}'? [y/N] ")
         except EOFError:
@@ -1716,7 +2145,7 @@ class Items:
             case "rename":
                 error = items.rename_command(rest)
             case "delete":
-                error = items.delete_command(rest)
+                error = items.delete_command(rest, ask)
             case "priority":
                 error = items.priority_command(rest)
             case "enable" | "disable":
@@ -1781,16 +2210,23 @@ def write_startup(collections: list["Items"]) -> str:
 
 
 def print_items(
-    items: list[Item], long: bool = False, priority: bool = False
+    items: list[Item],
+    long: bool = False,
+    priority: bool = False,
+    prefix: str = "",
 ) -> None:
     """Print one line per item: number, state, priority, tag and title.
 
-    The priority is only printed if `priority`, with "-" for none.  If
-    `long`, the created and updated times are also printed in the local
-    time zone.
+    The priority is only printed if `priority`, with "-" for none.  Tags
+    are printed with `prefix`.  If `long`, the created and updated times
+    are also printed in the local time zone.
     """
     width: int = max((len(item.number) for item in items), default=0)
-    tag_width: int = max((len(item.tag) for item in items), default=0)
+    tags: dict[tuple[int, ...], str] = {
+        item.name: f"{prefix}{item.tag}" if item.tag else ""
+        for item in items
+    }
+    tag_width: int = max((len(tag) for tag in tags.values()), default=0)
     state_width: int = max(len(state) for state in STATES)
     time_width: int = len("YYYY-MM-DD HH:MM")
     for item in items:
@@ -1808,7 +2244,7 @@ def print_items(
         print(
             f"{item.number:<{width}}  "
             f"{item.state:<{state_width}}  "
-            f"{levels}{item.tag:<{tag_width}}  {times}{item.title}"
+            f"{levels}{tags[item.name]:<{tag_width}}  {times}{item.title}"
         )
 
 
