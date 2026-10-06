@@ -1,7 +1,6 @@
 @7_Review_README.md_together/Details.md
 @8_Explore_moving_items_between_collections/Details.md
-@9_Hide_closed_items_and_check_on_startup/Details.md
-@9_Hide_closed_items_and_check_on_startup/Context.md
+@9_Hide_closed_items_and_check_on_startup/Summary.md
 @2_Cleanup/Summary.md
 @3_Support_Multiple_Item_Collections/Summary.md
 @4_Add_support_for_Issues/Summary.md
