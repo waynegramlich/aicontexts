@@ -107,3 +107,29 @@ M. `undo N` / `redo N` with fewer than N steps available refuses and
   another item's old name.  Both fixed.
 * 306 checks; coverage misses only `# pragma: no cover` lines (a new
   `_test_write_failures` covers the write-error returns).
+
+## 2026-10-06 Undo/redo removed
+
+* The user decided undo/redo was not worth it (~10% of `tracker.py`);
+  version control is the undo.  Removed: `undo`/`redo` commands,
+  `record()`, `clear_history()`, `step_history()`, `history_command()`,
+  `UNDO_LIMIT`, the fence calls, and their tests.  (Undo across a delete
+  had never been built: delete was already permanent.)
+* Instead: `move_command()` / `rename_command()` call
+  `remind_to_snapshot()` before the operation and
+  `note_move_or_rename()` after it, which saves
+  `"last_move_or_rename": <UTC stamp>` in `.tracker.json`.  If there is
+  no (valid) stamp or it is at least `MOVE_RENAME_DELAY_SECONDS` (3600)
+  old, a reminder to take a version control snapshot goes to stderr; the
+  operation still runs.  `TRACKER_TEST_MOVE_RENAME_DELAY_SECONDS`
+  (`DELAY_VARIABLE`) overrides the delay; a non-number is ignored.
+  Only the command layer reminds, so direct method calls in tests are
+  quiet.
+* 283 checks; coverage misses only `# pragma: no cover` lines;
+  `tracker.py` went from 2885 to about 2715 lines.
+* 2026-10-06 follow-up: the reminder now asks "Continue? Yes(y) or
+  No(n)." (`confirm_snapshot(ask)`); anything but y/yes (or EOF) gives
+  "Not moved" / "Not renamed".  `move_command()` plans the move and
+  `rename_command()` checks the item and title first, so a command that
+  would fail anyway is not asked about.  291 checks; full coverage apart
+  from `# pragma: no cover`.

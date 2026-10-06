@@ -32,9 +32,10 @@ the old tag in the same pass.
 Item numbers never have gaps.  `create` and `move` take a place: the next
 free number of a level (e.g. `1.3`), or `before NUMBER` / `after NUMBER`
 (e.g. `tracker t move T.fbm after 2.1`, or `tracker t create before 1.1
-Fix Big Mistake`).  `rename NUMBER to TITLE...` changes a title.  Moves
-and renames can be undone with `undo [N]` and redone with `redo [N]`, but
-not past a create, delete, state change or priority change.  `delete` is
+Fix Big Mistake`).  `rename NUMBER to TITLE...` changes a title.  There is
+no undo: when `tracker` recommends a version control snapshot before a
+move or rename and asks whether to continue, Claude answers no, takes an
+`hg` checkpoint, and then runs the command again.  `delete` is
 permanent: it refuses an item with children unless given `-r` (which asks
 first), and renumbers the later items.  Never run `delete` (or other
 changing commands) on the real items just to see what happens; try it in

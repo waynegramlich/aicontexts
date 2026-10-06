@@ -57,9 +57,12 @@ the `Context.md` of every Open or Reference Item, for every collection (e.g.
 `@../ISSUES/1_Crash/Details.md`).  Adding `@TASKS/Startup.md` to `CLAUDE.md`
 loads them at the start of each AI session.
 
-Moves and renames can be undone and redone (`tracker t undo [N]`,
-`tracker t redo [N]`), back to the last create, delete, state change or
-priority change, which can not be undone.
+There is no undo; use a version control system.  Before a move or rename,
+if the collection has had no move or rename for over an hour (the time is
+kept in its `.tracker.json`), `tracker` recommends taking a snapshot first
+(e.g. `git commit`) and asks whether to continue.  The test suite
+shortens the hour with the `TRACKER_TEST_MOVE_RENAME_DELAY_SECONDS`
+environment variable.
 
 Run `tracker` with no arguments to list the commands.  `tracker t ls -l` also
 lists the created and updated times in the local time zone.

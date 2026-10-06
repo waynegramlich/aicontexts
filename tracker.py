@@ -33,8 +33,6 @@ Commands:
                           NUMBER may be a range of siblings, like 1.2.5-6
   rename NUMBER to TITLE...
                           Change the title of an item
-  undo [N]                Undo the last N (default 1) moves and renames
-  redo [N]                Redo the last N undone moves and renames
   delete [-r] NUMBER      Delete an item and all of its files; with -r,
                           after asking, its children too.  NUMBER may be
                           a range of siblings, like 1.2.5-6
@@ -63,8 +61,10 @@ PLACE is one of:
                   down one
   after NUMBER    Just after item NUMBER; its later siblings move down one
 Deleting or moving items moves the later siblings (and their children) up
-to close the gap.  Undo and redo can not go back past a create, delete,
-state change or priority change.
+to close the gap.  There is no undo.  Before a move or rename, if the last
+one in the collection was more than an hour ago, tracker recommends taking
+a version control snapshot (e.g. `git commit`) first, and asks whether to
+continue.
 
 Item states are: Pending, Open, Reference, Suspended, Closed
 New items are created Pending.  Open items are being worked on.  Reference
@@ -103,8 +103,11 @@ STARTUP_COLLECTION: str = "TASKS"
 # The priority levels, from catastrophic (0) to low (3).
 PRIORITIES: tuple[int, ...] = (0, 1, 2, 3)
 
-# The most undo steps that are kept for a collection.
-UNDO_LIMIT: int = 100
+# The seconds after a move or rename before the next one reminds the user
+# to take a version control snapshot.  The test suite can change it with
+# the environment variable named by `DELAY_VARIABLE`.
+MOVE_RENAME_DELAY_SECONDS: float = 3600.0
+DELAY_VARIABLE: str = "TRACKER_TEST_MOVE_RENAME_DELAY_SECONDS"
 
 # The places relative to an existing item.
 PLACES: tuple[str, ...] = ("before", "after")
@@ -132,8 +135,6 @@ COMMANDS: dict[str, str] = {
     "close": "close",
     "priority": "priority",
     "move": "move",
-    "undo": "undo",
-    "redo": "redo",
     "enable": "enable",
     "disable": "disable",
     "help": "help",
@@ -567,32 +568,53 @@ class Items:
         """
         return self.save_settings({**self.settings, feature: enabled})
 
-    def record(self, step: dict[str, object]) -> str:
-        """Add `step` (a move or rename) to the undo history.
+    def confirm_snapshot(self, ask: Callable[[str], str]) -> bool:
+        """Before a move or rename, recommend a version control snapshot.
 
-        The redo history is cleared, and only the last `UNDO_LIMIT` steps
-        are kept.  Returns an empty string on success, or an error string
-        on failure.
+        If there has been no move or rename in this collection for
+        `MOVE_RENAME_DELAY_SECONDS` (or the seconds in the `DELAY_VARIABLE`
+        environment variable), a reminder is printed to stderr and `ask`
+        asks whether to continue.  Returns whether to go ahead.
         """
-        undo: object = self.settings.get("undo")
-        steps: list[object] = list(undo) if isinstance(undo, list) else []
-        steps.append(step)
-        return self.save_settings(
-            {**self.settings, "undo": steps[-UNDO_LIMIT:], "redo": []}
-        )
+        delay: float = MOVE_RENAME_DELAY_SECONDS
+        with contextlib.suppress(ValueError):
+            delay = float(os.environ.get(DELAY_VARIABLE, delay))
+        last: object = self.settings.get("last_move_or_rename")
+        try:
+            elapsed: float = (
+                time.time() - datetime.fromisoformat(str(last)).timestamp()
+            )
+        except ValueError:
+            elapsed = delay
+        if elapsed >= delay:
+            print(
+                f"No move or rename in '{self.items_directory.name}' for "
+                + (
+                    "over an hour"
+                    if delay == MOVE_RENAME_DELAY_SECONDS
+                    else f"over {delay:g} seconds"
+                )
+                + "; consider taking a version control "
+                "snapshot (e.g. `git commit`) before moving or renaming "
+                "items.",
+                file=sys.stderr,
+            )
+            try:
+                answer: str = ask("Continue? Yes(y) or No(n). ")
+            except EOFError:
+                answer = ""
+            return answer.strip().casefold() in ("y", "yes")
+        return True
 
-    def clear_history(self) -> str:
-        """Clear the undo and redo history, as a create or delete does.
+    def note_move_or_rename(self) -> str:
+        """Save the time of a move or rename in `.tracker.json`.
 
         Returns an empty string on success, or an error string on failure.
         """
-        if not self.settings.get("undo") and not self.settings.get("redo"):
-            return ""
         return self.save_settings(
             {
-                key: value
-                for key, value in self.settings.items()
-                if key not in ("undo", "redo")
+                **self.settings,
+                "last_move_or_rename": utc_stamp(time.time()),
             }
         )
 
@@ -752,7 +774,7 @@ class Items:
             f"renumbered {changes}",
             file=sys.stderr,
         )
-        error: str = self.renumber(new_names) or self.clear_history()
+        error: str = self.renumber(new_names)
         if error:
             print(error, file=sys.stderr)
 
@@ -799,9 +821,8 @@ class Items:
         """Create a new Item at `number`, or `place` ("before" or "after")
         the existing item `number` (a number or tag).
 
-        The later items are renumbered to make room, and the undo history
-        is cleared.  Returns the new Item, or an error string if it can not
-        be created.
+        The later items are renumbered to make room.  Returns the new
+        Item, or an error string if it can not be created.
         """
         if place:
             return self.create_at_place(number, title, place)
@@ -861,8 +882,7 @@ class Items:
     def make_item(self, name: tuple[int, ...], title: str) -> Item | str:
         """Make the directory and files of a new item `name`.
 
-        The undo history is cleared.  Returns the new Item, or an error
-        string if it can not be made.
+        Returns the new Item, or an error string if it can not be made.
         """
         number: str = number_text(name)
         title = title.strip()
@@ -894,7 +914,7 @@ class Items:
             )
         self.items[name] = item
         self.directories[name] = item_directory
-        return self.clear_history() or item
+        return item
 
     def select_items(
         self, name: tuple[int, ...], recursive: bool = False
@@ -913,21 +933,14 @@ class Items:
             return [self.items[name]]
         return f"Item '{number}' does not exist"
 
-    def rename_item(
-        self,
-        name: tuple[int, ...],
-        title: str,
-        tag: str = "",
-        record: bool = True,
-    ) -> Item | str:
+    def rename_item(self, name: tuple[int, ...], title: str) -> Item | str:
         """Change the title of item `name`.
 
         The item directory is renamed to match, and the heading line of its
         `Details.md` is rewritten, or added if it is missing.  The tag is
-        made from the new title, unless it would be the same as before, or
-        is `tag` if given.  The updated time is set to now, and if `record`
-        the rename is added to the undo history.  Returns the renamed item,
-        or an error string if it can not be renamed.
+        made from the new title, unless it would be the same as before.
+        The updated time is set to now.  Returns the renamed item, or an
+        error string if it can not be renamed.
         """
         number: str = ".".join(str(part) for part in name)
         if name not in self.items:
@@ -943,12 +956,8 @@ class Items:
         if new_directory != old_directory and new_directory.exists():
             return f"'{new_directory}' already exists"
         item: Item = self.items[name]
-        old: list[str] = [item.title, item.tag]
-        if tag:
-            pass
-        elif item.tag and base_tag(title) == base_tag(item.title):
-            tag = item.tag
-        else:
+        tag: str = item.tag
+        if not tag or base_tag(title) != base_tag(item.title):
             tag = unique_tag(
                 base_tag(title),
                 (
@@ -972,17 +981,6 @@ class Items:
         item.tag = tag
         item.updated = updated
         self.directories[name] = new_directory
-        if record:
-            failure: str = self.record(
-                {
-                    "command": "rename",
-                    "number": number,
-                    "old": old,
-                    "new": [title, tag],
-                }
-            )
-            if failure:
-                return failure
         return item
 
     def plan_place(
@@ -1140,7 +1138,7 @@ class Items:
         renumbered: dict[str, Item] = {
             number_text(old): self.items[old] for old in sorted(new_names)
         }
-        failure: str = self.renumber(new_names) or self.clear_history()
+        failure: str = self.renumber(new_names)
         if failure:
             return failure
         return doomed, renumbered
@@ -1150,9 +1148,9 @@ class Items:
     ) -> dict[str, Item] | str:
         """Move the sibling items `names`, with their children, to a place.
 
-        `place` and `target` are as for `plan_place()`.  The move is added
-        to the undo history.  Returns the renumbered items keyed by their
-        old numbers, or an error string on failure.
+        `place` and `target` are as for `plan_place()`.  Returns the
+        renumbered items keyed by their old numbers, or an error string on
+        failure.
         """
         planned: (
             tuple[dict[tuple[int, ...], tuple[int, ...]], tuple[int, ...]]
@@ -1164,109 +1162,10 @@ class Items:
         error: str = self.renumber(new_names)
         if error:
             return error
-        if new_names:
-            error = self.record(
-                {
-                    "command": "move",
-                    "renumbered": [
-                        [number_text(old), number_text(new)]
-                        for old, new in sorted(new_names.items())
-                    ],
-                }
-            )
-            if error:
-                return error
         return {
             number_text(old): self.items[new]
             for old, new in sorted(new_names.items())
         }
-
-    def step_history(self, count: int, undo: bool) -> list[str] | str:
-        """Undo (or redo, if not `undo`) the last `count` steps.
-
-        Returns a description of each step, or an error string if there
-        are not `count` steps or one can not be done.
-        """
-        source: str = "undo" if undo else "redo"
-        other: str = "redo" if undo else "undo"
-        listed: object = self.settings.get(source)
-        steps: list[object] = list(listed) if isinstance(listed, list) else []
-        listed = self.settings.get(other)
-        done: list[object] = list(listed) if isinstance(listed, list) else []
-        if count > len(steps):
-            return (
-                f"Only {len(steps)} step{'' if len(steps) == 1 else 's'} "
-                f"can be {'undone' if undo else 'redone'}"
-            )
-        verb: str = "Undid" if undo else "Redid"
-
-        def to_name(text: object, exists: bool = True) -> tuple[int, ...]:
-            name: tuple[int, ...] | str = parse_number(str(text))
-            if isinstance(name, str) or (exists and name not in self.items):
-                raise ValueError(f"no item '{text}'")
-            return name
-
-        messages: list[str] = []
-        for _ in range(count):
-            step: object = steps.pop()
-            error: str = ""
-            try:
-                if not isinstance(step, dict):
-                    raise TypeError(f"{step!r} is not an object")
-                if step.get("command") == "move":
-                    pairs: list[tuple[tuple[int, ...], tuple[int, ...]]] = [
-                        (to_name(new), to_name(old, False))
-                        if undo
-                        else (to_name(old), to_name(new, False))
-                        for old, new in step["renumbered"]
-                    ]
-                    renamed_names: set[tuple[int, ...]] = (
-                        set(self.items) - {old for old, _ in pairs}
-                    ) | {new for _, new in pairs}
-                    if len(renamed_names) != len(self.items) or any(
-                        name[:-1] + (part,) not in renamed_names
-                        for name in renamed_names
-                        for part in range(1, name[-1])
-                    ) or any(
-                        name[:length] not in renamed_names
-                        for name in renamed_names
-                        for length in range(1, len(name))
-                    ):
-                        raise ValueError("the move would leave a gap")
-                    error = self.renumber(dict(pairs))
-                    messages.append(
-                        f"{verb} move: "
-                        + ", ".join(
-                            f"{number_text(old)} -> {number_text(new)}"
-                            for old, new in sorted(pairs)
-                        )
-                    )
-                elif step.get("command") == "rename":
-                    title, tag = step["old" if undo else "new"]
-                    renamed: Item | str = self.rename_item(
-                        to_name(step["number"]), str(title), str(tag), False
-                    )
-                    error = renamed if isinstance(renamed, str) else ""
-                    messages.append(
-                        f"{verb} rename: {step['number']} is now {title}"
-                    )
-                else:
-                    raise ValueError(f"unknown step {step!r}")
-            except (KeyError, TypeError, ValueError) as problem:
-                return (
-                    f"The {source} history in "
-                    f"'{self.items_directory / COLLECTION_FILE}' is "
-                    f"damaged: {problem}"
-                )
-            if error:
-                return error
-            done.append(step)
-            error = self.save_settings(
-                {**self.settings, source: steps, other: done}
-            )
-            if error:
-                return error
-        return messages
 
     def set_state(
         self, name: tuple[int, ...], state: str, recursive: bool = False
@@ -1292,9 +1191,6 @@ class Items:
                 item_path: Path = item_directory / ITEM_FILE
                 return f"Unable to write '{item_path}': {error}"
             item.state = state
-            failure: str = self.clear_history()
-            if failure:
-                return failure
         return changed
 
     def set_priority(
@@ -1317,7 +1213,7 @@ class Items:
         except (OSError, ValueError) as error:
             return f"Unable to write '{item_directory / ITEM_FILE}': {error}"
         item.priority = priority
-        return self.clear_history() or item
+        return item
 
     def feature_command(self, command: str, arguments: list[str]) -> str:
         """Run `enable FEATURE` or `disable FEATURE`.
@@ -1376,9 +1272,12 @@ class Items:
         )
         return result if isinstance(result, str) else ""
 
-    def move_command(self, arguments: list[str]) -> str:
+    def move_command(
+        self, arguments: list[str], ask: Callable[[str], str] = input
+    ) -> str:
         """Run `move NUMBER [before|after] NUMBER`.
 
+        A valid move may first ask to continue (see `confirm_snapshot()`).
         Prints the renumbered items.  Returns an empty string on success,
         or an error string on failure.
         """
@@ -1399,33 +1298,25 @@ class Items:
         )
         if isinstance(target, str):
             return target
+        planned: (
+            tuple[dict[tuple[int, ...], tuple[int, ...]], tuple[int, ...]]
+            | str
+        ) = self.plan_place(names, place, target)
+        if isinstance(planned, str):
+            return planned
+        if not self.confirm_snapshot(ask):
+            return "Not moved"
         renumbered: dict[str, Item] | str = self.move_items(
             names, place, target
         )
         if isinstance(renumbered, str):
             return renumbered
+        error: str = self.note_move_or_rename()
+        if error:
+            return error
         if not renumbered:
             print("Nothing moved")
         self.show_renumbered(renumbered)
-        return ""
-
-    def history_command(self, command: str, arguments: list[str]) -> str:
-        """Run `undo [N]` or `redo [N]`.
-
-        Returns an empty string on success, or an error string on failure.
-        """
-        if len(arguments) > 1 or (
-            arguments
-            and not (arguments[0].isdecimal() and int(arguments[0]) > 0)
-        ):
-            return f"Usage: tracker COLLECTION {command} [N]"
-        result: list[str] | str = self.step_history(
-            int(arguments[0]) if arguments else 1, command == "undo"
-        )
-        if isinstance(result, str):
-            return result
-        for message in result:
-            print(message)
         return ""
 
     def show_renumbered(self, renumbered: dict[str, Item]) -> None:
@@ -1491,19 +1382,33 @@ class Items:
         self.show(changed)
         return ""
 
-    def rename_command(self, arguments: list[str]) -> str:
+    def rename_command(
+        self, arguments: list[str], ask: Callable[[str], str] = input
+    ) -> str:
         """Run `rename NUMBER to TITLE...`.
 
-        Returns an empty string on success, or an error string on failure.
+        A rename of an existing item to a usable title may first ask to
+        continue (see `confirm_snapshot()`).  Returns an empty string on
+        success, or an error string on failure.
         """
         if len(arguments) < 3 or arguments[1] != "to":
             return "Usage: tracker COLLECTION rename NUMBER to TITLE..."
         name: tuple[int, ...] | str = self.resolve(arguments[0])
         if isinstance(name, str):
             return name
-        renamed: Item | str = self.rename_item(name, " ".join(arguments[2:]))
+        if name not in self.items:
+            return f"Item '{number_text(name)}' does not exist"
+        title: str = " ".join(arguments[2:])
+        if not clean_title(title):
+            return f"Item '{number_text(name)}' has an empty title"
+        if not self.confirm_snapshot(ask):
+            return "Not renamed"
+        renamed: Item | str = self.rename_item(name, title)
         if isinstance(renamed, str):
             return renamed
+        error: str = self.note_move_or_rename()
+        if error:
+            return error
         self.show([renamed])
         return ""
 
@@ -2118,7 +2023,7 @@ class Items:
 
     @staticmethod
     def _test_moving(check: Check, directory: Path) -> None:
-        """Test creating at a place, moving, and undo and redo."""
+        """Test creating at a place and moving."""
         items: Items = Items(directory)
         for number, title in (
             ("1", "A"), ("1.1", "B"), ("1.2", "C"), ("2", "D"), ("2.1", "E")
@@ -2190,73 +2095,10 @@ class Items:
             items.move_items([(1, 1)], "before", (1, 2)) == {},
             "a move to the same place changes nothing",
         )
-        check(
-            "Only 3 steps" in str(items.step_history(4, True)),
-            "undo more steps than there are",
-        )
-        check(
-            items.step_history(1, True)
-            == ["Undid move: 1.4 -> 2, 1.4.1 -> 2.1, 1.4.2 -> 2.2"]
-            and tree() == "1A 1.1C 1.2N 1.3F 2D 2.1E 2.2B",
-            "undo a move",
-        )
-        items.step_history(2, True)
-        check(tree() == "1A 1.1N 1.2F 1.3B 1.4C 2D 2.1E", "undo two moves")
-        items.step_history(1, False)
-        check(tree() == "1A 1.1B 1.2C 1.3N 1.4F 2D 2.1E", "redo a move")
-        items.rename_item((1, 3), "Nu Two")
-        check(items.items[(1, 3)].tag == "nt", "rename for undo")
-        items.step_history(1, True)
-        check(
-            tree() == "1A 1.1B 1.2C 1.3N 1.4F 2D 2.1E"
-            and items.items[(1, 3)].tag == "n"
-            and Items(directory).items[(1, 3)].tag == "n",
-            "undo a rename",
-        )
-        items.step_history(1, False)
-        check(
-            items.items[(1, 3)].tag == "nt"
-            and items.settings["redo"] == []
-            and isinstance(items.settings["undo"], list)
-            and len(items.settings["undo"]) == 2,
-            "redo a rename",
-        )
-        items.set_state((1,), "Open")
-        check(
-            "undo" not in items.settings
-            and "Only 0 steps" in str(items.step_history(1, True)),
-            "a state change is a fence",
-        )
-        for _ in range(UNDO_LIMIT + 5):
-            items.record({"command": "none"})
-        undo: object = items.settings["undo"]
-        check(
-            isinstance(undo, list) and len(undo) == UNDO_LIMIT,
-            "the undo history is limited",
-        )
-        items.set_priority((1,), None)
-        check("undo" not in items.settings, "a priority change is a fence")
-        for steps, message in (
-            (["junk"], "is not an object"),
-            ([{"command": "none"}], "unknown step"),
-            ([{"command": "move", "renumbered": [["1", "9"]]}], "no item '9'"),
-            ([{"command": "move", "renumbered": [["9", "1"]]}], "a gap"),
-            ([{"command": "move", "renumbered": [["9", "1.1"]]}], "a gap"),
-            ([{"command": "rename", "number": "1"}], "'old'"),
-        ):
-            items.save_settings({**items.settings, "undo": steps})
-            check(
-                "history in" in str(items.step_history(1, True))
-                and message in str(items.step_history(1, True)),
-                f"damaged undo history {steps}",
-            )
-        items.save_settings({**items.settings, "undo": [{"command": "x"}]})
-        items.create_item("1.5", "Kept")
-        check("undo" not in items.settings, "a create is a fence")
 
     @staticmethod
     def _test_write_failures(check: Check, directory: Path) -> None:
-        """Test failing to write while renumbering or keeping history."""
+        """Test failing to write while renumbering or noting the time."""
         if os.geteuid() == 0:
             # Permissions are not enforced for root.
             return  # pragma: no cover
@@ -2268,34 +2110,38 @@ class Items:
             items.create_item("2", "B")
             return items
 
-        history: Items = collection("history")
-        history.rename_item((1,), "Ay")
-        (directory / "history" / COLLECTION_FILE).chmod(0o400)
-        check(
-            "Unable to write" in str(history.rename_item((2,), "Bee")),
-            "rename can not record",
-        )
-        check(
-            "Unable to write"
-            in str(history.move_items([(2,)], "before", (1,))),
-            "move can not record",
-        )
-        check(
-            "Unable to write" in str(history.step_history(1, True)),
-            "undo can not save",
-        )
-        check(
-            "Unable to write" in str(history.set_state((1,), "Open")),
-            "state change can not clear the history",
-        )
-        (directory / "history" / COLLECTION_FILE).chmod(0o600)
-        undo: Items = collection("undo")
-        undo.move_items([(2,)], "before", (1,))
-        (undo.directories[(1,)] / "Details.md").chmod(0o400)
-        check(
-            "Unable to renumber" in str(undo.step_history(1, True)),
-            "undo can not renumber",
-        )
+        notes: Items = collection("notes")
+        (directory / "notes" / COLLECTION_FILE).chmod(0o400)
+        with (
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            check(
+                "Unable to write"
+                in notes.rename_command(["1", "to", "Ay"], lambda _: "y")
+                and "Unable to write"
+                in notes.move_command(["2", "before", "1"], lambda _: "y"),
+                "the time of a move or rename can not be saved",
+            )
+        (directory / "notes" / COLLECTION_FILE).chmod(0o600)
+        commands: Items = collection("commands")
+        (commands.directories[(2,)] / "Details.md").chmod(0o400)
+        (directory / "commands" / "1_Taken").mkdir()
+
+        def yes(_: str) -> str:
+            return "y"
+
+        with (
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            check(
+                "Unable to renumber"
+                in commands.move_command(["1", "after", "2"], yes)
+                and "already exists"
+                in commands.rename_command(["1", "to", "Taken"], yes),
+                "a confirmed move or rename can still fail",
+            )
         move: Items = collection("move")
         (move.directories[(2,)] / "Details.md").chmod(0o400)
         check(
@@ -2310,6 +2156,78 @@ class Items:
             in str(create.create_item("1", "N", "before")),
             "create before can not renumber",
         )
+
+    @staticmethod
+    def _test_snapshot_reminder(
+        check: Check, run: Callable[..., tuple[int, str]], answers: list[str]
+    ) -> None:
+        """Test the reminder to snapshot before a move or rename.
+
+        `run` runs a command in a directory with a TASKS collection whose
+        item 1 has one child, and returns its exit code and output.  The
+        `answers` are given to its questions in turn.
+        """
+        saved: str | None = os.environ.pop(DELAY_VARIABLE, None)
+        try:
+            settings: object = json.loads(
+                read_file(Path("TASKS") / COLLECTION_FILE)
+            )
+            check(
+                isinstance(settings, dict)
+                and local_time(str(settings["last_move_or_rename"]))
+                not in ("-", "?"),
+                "the time of the last move or rename is saved",
+            )
+            rename: tuple[str, ...] = ("t", "ren", "1", "to", "An", "item")
+            move: tuple[str, ...] = ("t", "mo", "1.1", "1.2")
+            check(
+                "snapshot" not in run(*rename)[1]
+                and "snapshot" not in run(*move)[1],
+                "no reminder soon after a move or rename",
+            )
+            cases: list[tuple[str, list[str], int, str]] = [
+                ("0", ["y"], 0, "snapshot"),
+                ("0", ["n"], 1, "Not renamed"),
+                ("0", [], 1, "Not renamed"),
+                ("junk", [], 0, "An item"),
+            ]
+            for delay, given, code, text in cases:
+                os.environ[DELAY_VARIABLE] = delay
+                answers[:] = given
+                result: tuple[int, str] = run(*rename)
+                check(
+                    result[0] == code and text in result[1],
+                    f"rename with delay {delay!r} and answers {given}",
+                )
+            os.environ[DELAY_VARIABLE] = "0"
+            answers[:] = ["n"]
+            check(run(*move)[1].endswith("Not moved\n"), "a move is refused")
+            answers[:] = ["y"]
+            check("Nothing moved" in run(*move)[1], "a move goes ahead")
+            answers[:] = []
+            for arguments, text in (
+                (("t", "mo", "1", "before", "1"), "before themselves"),
+                (("t", "ren", "9", "to", "Nine"), "'9' does not exist"),
+                (("t", "ren", "1", "to", "!!"), "empty title"),
+            ):
+                result = run(*arguments)
+                check(
+                    text in result[1] and "snapshot" not in result[1],
+                    f"no reminder for a bad command {arguments}",
+                )
+            del os.environ[DELAY_VARIABLE]
+            write_file(
+                Path("TASKS") / COLLECTION_FILE,
+                '{"last_move_or_rename": "junk"}\n',
+            )
+            answers[:] = ["y"]
+            check(
+                "snapshot" in run(*rename)[1],
+                "reminder after a damaged time",
+            )
+        finally:
+            if saved is not None:
+                os.environ[DELAY_VARIABLE] = saved  # pragma: no cover
 
     @staticmethod
     def _test_commands(check: Check, directory: Path) -> None:
@@ -2396,7 +2314,7 @@ class Items:
                 ("", ("t", "open"), 1, "Usage"),
                 ("", ("t", "close", "9"), 1, "does not exist"),
                 ("", ("t", "close", "x"), 1, "Invalid"),
-                ("", ("t", "ren", "1.1", "to", "New", "child"), 0, "New"),
+                ("y", ("t", "ren", "1.1", "to", "New", "child"), 0, "New"),
                 ("", ("t", "ren", "1.1", "New", "child"), 1, "Usage"),
                 ("", ("t", "rename", "1"), 1, "Usage"),
                 ("", ("t", "rename", "x", "to", "y"), 1, "Invalid"),
@@ -2441,18 +2359,11 @@ class Items:
                 ("", ("t", "mo", "x", "2"), 1, "Invalid"),
                 ("", ("t", "mo", "1", "before", "x"), 1, "Invalid"),
                 ("", ("t", "mo", "1", "2..3"), 1, "Invalid"),
-                ("", ("t", "u", "5"), 1, "Only 1 step can be undone"),
-                ("", ("t", "u", "0"), 1, "Usage"),
-                ("", ("t", "u", "1", "2"), 1, "Usage"),
-                ("", ("t", "u"), 0, "Undid move: 1 -> 2, 2 -> 1, 2.1 -> 1.1"),
-                ("", ("t", "red"), 0, "Redid move: 1 -> 2, 1.1 -> 2.1, 2 ->"),
-                ("", ("t", "u"), 0, "Undid move"),
+                ("", ("t", "mo", "2", "before", "1"), 0, "\n1   -> 2    "),
                 ("", ("t", "ren", "2", "to", "Second", "item"), 0, "T.si"),
-                ("", ("t", "u"), 0, "Undid rename: 2 is now Second"),
                 ("", ("t", "cr", "before", "x", "Bad"), 1, "Invalid"),
                 ("", ("t", "cr", "before", "1"), 1, "Usage"),
                 ("", ("t", "del", "2"), 0, "Second"),
-                ("", ("t", "red"), 1, "Only 0 steps can be redone"),
             ):
                 answers[:] = [answer] if answer else []
                 result: tuple[int, str] = run(*arguments)
@@ -2472,6 +2383,7 @@ class Items:
                 "[y/N] ",
                 "ask before creating a collection",
             )
+            Items._test_snapshot_reminder(check, run, answers)
             check(
                 read_file(Path("TASKS/Startup.md"))
                 == "@1_An_item/Details.md\n@1_An_item/Context.md\n"
@@ -2759,15 +2671,13 @@ class Items:
             case "list":
                 error = items.list_command(rest)
             case "rename":
-                error = items.rename_command(rest)
+                error = items.rename_command(rest, ask)
             case "delete":
                 error = items.delete_command(rest, ask)
             case "priority":
                 error = items.priority_command(rest)
             case "move":
-                error = items.move_command(rest)
-            case "undo" | "redo":
-                error = items.history_command(commands[0], rest)
+                error = items.move_command(rest, ask)
             case "enable" | "disable":
                 error = items.feature_command(commands[0], rest)
             case state_command:
