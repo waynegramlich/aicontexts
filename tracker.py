@@ -38,6 +38,10 @@ Commands:
   reference [-r] NUMBER   Set the item state to Reference
   suspend [-r] NUMBER     Set the item state to Suspended
   close [-r] NUMBER       Set the item state to Closed
+  priority NUMBER LEVEL   Set the item priority: 0 (catastrophic), 1 (high),
+                          2 (medium), 3 (low), or - for none
+  enable FEATURE          Enable a collection feature (only: priority)
+  disable FEATURE         Disable a collection feature
   help                    Print this help message
 
 Options:
@@ -46,7 +50,15 @@ Options:
 
 Item states are: Pending, Open, Reference, Suspended, Closed
 New items are created Pending.  Open items are being worked on.  Reference
-items are not, but like Open items their Context.md is in Startup.md."""
+items are not, but like Open items their Context.md is in Startup.md.
+
+Each item has a tag: the first letter of each word of its title in lower
+case, ignoring "a", "an", "of" and "the" (e.g. "Division by Zero is Bad"
+is `dbzib`).  When a tag is already used in the collection, the new item
+gets the lowest free number added (e.g. `cde2`).
+
+When priority is enabled for a collection, its items are listed by
+priority first (0 to 3, then none) and the priority is shown."""
 
 STATES: tuple[str, ...] = (
     "Pending", "Open", "Reference", "Suspended", "Closed"
@@ -67,6 +79,15 @@ COLLECTION_FILE: str = ".tracker.json"
 # The collection that holds `Startup.md` for all of the collections.
 STARTUP_COLLECTION: str = "TASKS"
 
+# The priority levels, from catastrophic (0) to low (3).
+PRIORITIES: tuple[int, ...] = (0, 1, 2, 3)
+
+# The features that can be enabled for a collection in `.tracker.json`.
+FEATURES: tuple[str, ...] = ("priority",)
+
+# The words that are left out of a tag.
+TAG_IGNORED_WORDS: frozenset[str] = frozenset({"a", "an", "of", "the"})
+
 # The commands, and the command that each one runs.
 COMMANDS: dict[str, str] = {
     "create": "create",
@@ -79,6 +100,9 @@ COMMANDS: dict[str, str] = {
     "reference": "reference",
     "suspend": "suspend",
     "close": "close",
+    "priority": "priority",
+    "enable": "enable",
+    "disable": "disable",
     "help": "help",
 }
 
@@ -165,17 +189,27 @@ def read_item(item_directory: Path) -> dict[str, object]:
     raise ValueError(f"'{item_path}' is not a JSON object")
 
 
-def update_item(item_directory: Path, state: str = "") -> str:
+def update_item(
+    item_directory: Path,
+    state: str = "",
+    fields: dict[str, object] | None = None,
+) -> str:
     """Set the updated time in the `.item.json` of `item_directory` to now.
 
     If `state` is given, the state is changed too, and the change is
-    appended to the "history" list.  Any other metadata is kept.  Returns
+    appended to the "history" list.  The `fields` are also set, and a
+    field set to None is removed.  Any other metadata is kept.  Returns
     the new updated time.  Raises an `OSError` or a `ValueError` like
     `read_item()`.
     """
     metadata: dict[str, object] = read_item(item_directory)
     stamp: str = utc_stamp(time.time())
     metadata["updated"] = stamp
+    for key, value in (fields or {}).items():
+        if value is None:
+            metadata.pop(key, None)
+        else:
+            metadata[key] = value
     if state:
         history: object = metadata.get("history")
         if not isinstance(history, list):
@@ -219,6 +253,54 @@ def find_collections(start: Path) -> list[Path]:
         if found:
             return found
     return []
+
+
+def base_tag(title: str) -> str:
+    """Return the tag for `title`, before it is made unique.
+
+    The tag is the first letter or digit of each word in lower case.
+    Punctuation is dropped, a hyphenated word only gives its first letter,
+    and the words in `TAG_IGNORED_WORDS` are left out.  If every word is
+    left out, the first letter or digit of `title` is used.
+    """
+    tag: str = ""
+    for word in title.split():
+        characters: str = "".join(
+            character for character in word if character.isalnum()
+        ).casefold()
+        if characters and characters not in TAG_IGNORED_WORDS:
+            tag += characters[0]
+    if not tag:
+        tag = next(
+            (character for character in title if character.isalnum()), ""
+        ).casefold()
+    return tag
+
+
+def unique_tag(base: str, used: Iterable[str]) -> str:
+    """Return `base`, or `base` plus the lowest number from 2 not `used`."""
+    used_tags: set[str] = set(used)
+    if base not in used_tags:
+        return base
+    number: int = 2
+    while f"{base}{number}" in used_tags:
+        number += 1
+    return f"{base}{number}"
+
+
+def parse_priority(level: str) -> int | None | str:
+    """Convert a priority `level` like "2" into 2, or "-" into None.
+
+    Returns an error string if `level` is not a valid priority.
+    """
+    if level == "-":
+        return None
+    if level.isdecimal() and int(level) in PRIORITIES:
+        return int(level)
+    return (
+        f"Invalid priority '{level}': it must be one of "
+        f"{', '.join(str(priority) for priority in PRIORITIES)} or -"
+    )
 
 
 def parse_number(number: str) -> tuple[int, ...] | str:
@@ -294,6 +376,8 @@ class Item:
     state: str = "Pending"
     created: str = ""
     updated: str = ""
+    tag: str = ""
+    priority: int | None = None
 
     def __post_init__(self) -> None:
         """Ensure that the name and state are valid.
@@ -355,10 +439,43 @@ class Items:
             self.error = (
                 f"Unable to create directory '{items_directory}': {error}"
             )
+        self.settings: dict[str, object] = {}
+        if not self.error:
+            try:
+                settings: object = json.loads(read_file(collection_path))
+            except (OSError, ValueError) as error:
+                self.error = f"Unable to read '{collection_path}': {error}"
+            else:
+                if isinstance(settings, dict):
+                    self.settings = settings
+                else:
+                    self.error = (
+                        f"Unable to read '{collection_path}': "
+                        "it is not a JSON object"
+                    )
         if self.error:
             print(self.error, file=sys.stderr)
         else:
             self.load_items()
+
+    @property
+    def priority_enabled(self) -> bool:
+        """Return whether priority is enabled for this collection."""
+        return self.settings.get("priority") is True
+
+    def set_feature(self, feature: str, enabled: bool) -> str:
+        """Enable or disable `feature` in `.tracker.json`.
+
+        Returns an empty string on success, or an error string on failure.
+        """
+        collection_path: Path = self.items_directory / COLLECTION_FILE
+        settings: dict[str, object] = {**self.settings, feature: enabled}
+        try:
+            write_file(collection_path, json.dumps(settings, indent=2) + "\n")
+        except OSError as error:
+            return f"Unable to write '{collection_path}': {error}"
+        self.settings = settings
+        return ""
 
     def load_items(self) -> None:
         """Load the existing items from the item directories.
@@ -386,6 +503,7 @@ class Items:
             prefix: str = f"# {number} "
             if heading.startswith(prefix):
                 title = heading[len(prefix):].strip()
+            priority: object = metadata.get("priority")
             try:
                 self.items[name] = Item(
                     name,
@@ -393,11 +511,44 @@ class Items:
                     state,
                     str(metadata.get("created", "")),
                     str(metadata.get("updated", "")),
+                    str(metadata.get("tag", "")),
+                    priority
+                    if isinstance(priority, int)
+                    and not isinstance(priority, bool)
+                    and priority in PRIORITIES
+                    else None,
                 )
             except ValueError as error:
                 print(f"Skipping '{item_directory}': {error}", file=sys.stderr)
             else:
                 self.directories[name] = item_directory
+        self.add_missing_tags()
+
+    def add_missing_tags(self) -> None:
+        """Give a unique tag to every item that does not have one.
+
+        This is for items made before tags existed, so the updated time is
+        not changed.  A tag that can not be written is reported to stderr.
+        """
+        for item in self.list_items():
+            if item.tag:
+                continue
+            tag: str = unique_tag(
+                base_tag(item.title),
+                (other.tag for other in self.items.values()),
+            )
+            item_directory: Path = self.directories[item.name]
+            try:
+                metadata: dict[str, object] = read_item(item_directory)
+                metadata["tag"] = tag
+                write_item(item_directory, metadata)
+            except (OSError, ValueError) as error:
+                print(
+                    f"Unable to add tag to '{item_directory}': {error}",
+                    file=sys.stderr,
+                )
+                continue
+            item.tag = tag
 
     def list_items(self, name: tuple[int, ...] = ()) -> list[Item]:
         """Return the items starting with `name`, sorted by name.
@@ -434,10 +585,15 @@ class Items:
             self.items_directory / f"{number}_{cleaned_title}"
         )
         stamp: str = utc_stamp(time.time())
-        item: Item = Item(name, title, created=stamp, updated=stamp)
+        tag: str = unique_tag(
+            base_tag(title), (other.tag for other in self.items.values())
+        )
+        item: Item = Item(name, title, created=stamp, updated=stamp, tag=tag)
         try:
             item_directory.mkdir()
-            write_item(item_directory, new_metadata(item.state, stamp))
+            write_item(
+                item_directory, {**new_metadata(item.state, stamp), "tag": tag}
+            )
             write_file(
                 item_directory / "Context.md", "# LLM Agent Context Log\n"
             )
@@ -473,9 +629,10 @@ class Items:
         """Change the title of item `name`.
 
         The item directory is renamed to match, and the heading line of its
-        `Details.md` is rewritten, or added if it is missing.  The updated
-        time is set to now.  Returns the renamed item, or an error string
-        if it can not be renamed.
+        `Details.md` is rewritten, or added if it is missing.  The tag is
+        made from the new title, unless it would be the same as before.
+        The updated time is set to now.  Returns the renamed item, or an
+        error string if it can not be renamed.
         """
         number: str = ".".join(str(part) for part in name)
         if name not in self.items:
@@ -490,6 +647,17 @@ class Items:
         )
         if new_directory != old_directory and new_directory.exists():
             return f"'{new_directory}' already exists"
+        item: Item = self.items[name]
+        tag: str = item.tag
+        if not tag or base_tag(title) != base_tag(item.title):
+            tag = unique_tag(
+                base_tag(title),
+                (
+                    other.tag
+                    for other in self.items.values()
+                    if other is not item
+                ),
+            )
         details_path: Path = old_directory / "Details.md"
         try:
             details: str = read_file(details_path)
@@ -497,12 +665,12 @@ class Items:
             if not heading.startswith(f"# {number} "):
                 rest = details
             write_file(details_path, f"# {number} {title}\n{rest}")
-            updated: str = update_item(old_directory)
+            updated: str = update_item(old_directory, fields={"tag": tag})
             old_directory.rename(new_directory)
         except (OSError, ValueError) as error:
             return f"Unable to rename item '{number}': {error}"
-        item: Item = self.items[name]
         item.title = title
+        item.tag = tag
         item.updated = updated
         self.directories[name] = new_directory
         return item
@@ -554,6 +722,67 @@ class Items:
             item.state = state
         return changed
 
+    def set_priority(
+        self, name: tuple[int, ...], priority: int | None
+    ) -> Item | str:
+        """Set the priority of item `name`, or remove it if None.
+
+        The updated time is set to now.  Returns the item, or an error
+        string on failure.
+        """
+        selected: list[Item] | str = self.select_items(name)
+        if isinstance(selected, str):
+            return selected
+        item: Item = selected[0]
+        item_directory: Path = self.directories[name]
+        try:
+            item.updated = update_item(
+                item_directory, fields={"priority": priority}
+            )
+        except (OSError, ValueError) as error:
+            return f"Unable to write '{item_directory / ITEM_FILE}': {error}"
+        item.priority = priority
+        return item
+
+    def feature_command(self, command: str, arguments: list[str]) -> str:
+        """Run `enable FEATURE` or `disable FEATURE`.
+
+        FEATURE may be any unique prefix of a feature.  Returns an empty
+        string on success, or an error string on failure.
+        """
+        found: list[str] = matches(arguments[0], FEATURES) if arguments else []
+        if len(arguments) != 1 or len(found) != 1:
+            return (
+                f"Usage: tracker COLLECTION {command} FEATURE, where "
+                f"FEATURE is one of: {', '.join(FEATURES)}"
+            )
+        return self.set_feature(found[0], command == "enable")
+
+    def priority_command(self, arguments: list[str]) -> str:
+        """Run `priority NUMBER LEVEL`.
+
+        Returns an empty string on success, or an error string on failure.
+        """
+        if not self.priority_enabled:
+            name: str = self.items_directory.name
+            return (
+                f"Priority is not enabled for '{name}'; use "
+                f"`tracker {name} enable priority`"
+            )
+        if len(arguments) != 2:
+            return "Usage: tracker COLLECTION priority NUMBER LEVEL"
+        number: tuple[int, ...] | str = parse_number(arguments[0])
+        if isinstance(number, str):
+            return number
+        priority: int | None | str = parse_priority(arguments[1])
+        if isinstance(priority, str):
+            return priority
+        changed: Item | str = self.set_priority(number, priority)
+        if isinstance(changed, str):
+            return changed
+        print_items([changed], priority=self.priority_enabled)
+        return ""
+
     def create_command(self, arguments: list[str]) -> str:
         """Run `create NUMBER TITLE...`.
 
@@ -585,7 +814,16 @@ class Items:
         )
         if isinstance(name, str):
             return name
-        print_items(self.list_items(name), long)
+        listed: list[Item] = self.list_items(name)
+        if self.priority_enabled:
+            listed.sort(
+                key=lambda item: (
+                    item.priority is None,
+                    item.priority or 0,
+                    item.name,
+                )
+            )
+        print_items(listed, long, self.priority_enabled)
         return ""
 
     def state_command(self, command: str, arguments: list[str]) -> str:
@@ -609,7 +847,7 @@ class Items:
         changed: list[Item] | str = self.set_state(name, state, recursive)
         if isinstance(changed, str):
             return changed
-        print_items(changed)
+        print_items(changed, priority=self.priority_enabled)
         return ""
 
     def rename_command(self, arguments: list[str]) -> str:
@@ -625,7 +863,7 @@ class Items:
         renamed: Item | str = self.rename_item(name, " ".join(arguments[1:]))
         if isinstance(renamed, str):
             return renamed
-        print_items([renamed])
+        print_items([renamed], priority=self.priority_enabled)
         return ""
 
     def delete_command(self, arguments: list[str]) -> str:
@@ -641,7 +879,7 @@ class Items:
         deleted: list[Item] | str = self.delete_item(*parsed)
         if isinstance(deleted, str):
             return deleted
-        print_items(deleted)
+        print_items(deleted, priority=self.priority_enabled)
         return ""
 
     @staticmethod
@@ -706,6 +944,49 @@ class Items:
             matches("task", ["TASK", "TASKS"]) == ["TASK"],
             "an exact match wins",
         )
+        for title, tag in (
+            ("Division by Zero is Bad", "dbzib"),
+            ("Can Dogs Eat", "cde"),
+            ("the re-run of an old-test", "ro"),
+            ("fix the-bug, (now)!", "ftn"),
+            ("`README.md` documentation", "rd"),
+            ("Item 1.2.3", "i1"),
+            ("The A, of AN", "t"),
+            ("!!", ""),
+        ):
+            check(base_tag(title) == tag, f"base_tag({title!r})")
+        unique_cases: list[tuple[str, list[str], str]] = [
+            ("cde", [], "cde"),
+            ("cde", ["cde"], "cde2"),
+            ("cde", ["cde", "cde2", "cde4"], "cde3"),
+        ]
+        for base, used, tag in unique_cases:
+            check(unique_tag(base, used) == tag, f"unique_tag {used}")
+        for level, priority in (("0", 0), ("3", 3), ("-", None)):
+            check(
+                parse_priority(level) == priority, f"parse_priority({level})"
+            )
+        for level in ("4", "-1", "x", "", "1.0"):
+            check(
+                isinstance(parse_priority(level), str),
+                f"reject priority {level!r}",
+            )
+        printed: list[Item] = [
+            Item((1,), "Can Dogs Eat", tag="cde", priority=0),
+            Item((1, 2), "X", "Reference", tag="x"),
+        ]
+        output: io.StringIO = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            print_items(printed)
+            print_items(printed, priority=True)
+        check(
+            output.getvalue()
+            == "1    Pending    cde  Can Dogs Eat\n"
+            "1.2  Reference  x    X\n"
+            "1    Pending    0  cde  Can Dogs Eat\n"
+            "1.2  Reference  -  x    X\n",
+            "print_items shows the tag, and the priority if asked",
+        )
         check(utc_stamp(0) == "1970-01-01T00:00:00Z", "utc_stamp")
         epoch: datetime = datetime.fromtimestamp(0, UTC).astimezone()
         check(
@@ -751,7 +1032,8 @@ class Items:
                 '{\n  "state": "Pending",\n'
             )
             and isinstance(item, Item)
-            and metadata == new_metadata("Pending", item.created)
+            and metadata
+            == {**new_metadata("Pending", item.created), "tag": "ti"}
             and local_time(item.created) not in ("-", "?"),
             "item file",
         )
@@ -896,7 +1178,10 @@ class Items:
             and not (old_format / OLD_STATUS_FILE).exists()
             and items.items[(8,)].created == "1970-01-01T00:00:00Z"
             and read_item(old_format)
-            == new_metadata("Suspended", "1970-01-01T00:00:00Z"),
+            == {
+                **new_metadata("Suspended", "1970-01-01T00:00:00Z"),
+                "tag": "of",
+            },
             "migrate a .status file to .item.json",
         )
         write_item(
@@ -967,6 +1252,31 @@ class Items:
             != "x",
             "rename sets the updated time",
         )
+        for number, title in (
+            ("5", "Can Dogs Eat"), ("6", "Caffeine Drink Elixir"),
+            ("7", "Hot Tub"),
+        ):
+            items.create_item(number, title)
+        check(
+            [items.items[(number,)].tag for number in (5, 6, 7)]
+            == ["cde", "cde2", "ht"],
+            "a clashing tag gets a number",
+        )
+        items.rename_item((6,), "Caffeine Drinks Everywhere")
+        check(items.items[(6,)].tag == "cde2", "rename keeps an equal tag")
+        items.rename_item((5,), "Hot Tea")
+        check(
+            items.items[(5,)].tag == "ht2"
+            and read_item(directory / "5_Hot_Tea")["tag"] == "ht2",
+            "rename makes a new unique tag",
+        )
+        check(
+            [item.tag for item in Items(directory).list_items((5,))]
+            == ["ht2"],
+            "reload a tag",
+        )
+        for key in ((5,), (6,), (7,)):
+            items.delete_item(key)
         write_file(directory / "2_Two" / "Details.md", "Notes\n")
         items.rename_item((2,), "Two")
         check(
@@ -1086,7 +1396,26 @@ class Items:
                 ("", ("t", "cl", "1"), 0, "Closed"),
                 ("", ("t", "s", "--recursive", "1"), 0, "1.1"),
                 ("", ("t", "o", "-r", "1"), 0, "Open"),
-                ("", ("t", "p", "1.1"), 0, "Pending"),
+                ("", ("t", "pe", "1.1"), 0, "Pending"),
+                ("", ("t", "p", "1.1"), 1, "pending, priority"),
+                ("", ("t", "pr", "1", "1"), 1, "Priority is not enabled"),
+                ("", ("t", "ls"), 0, "Open       i "),
+                ("", ("t", "en"), 1, "FEATURE is one of: priority"),
+                ("", ("t", "en", "x"), 1, "FEATURE is one of"),
+                ("", ("t", "en", "p", "q"), 1, "FEATURE is one of"),
+                ("", ("t", "en", "p"), 0, ""),
+                ("", ("t", "pr", "1.1", "0"), 0, "Pending    0  c  Child"),
+                ("", ("t", "ls"), 0, "0  c  Child\n1    Open       -  i  An"),
+                ("", ("t", "pr", "1", "1"), 0, "Open       1  i "),
+                ("", ("t", "pr", "1", "-"), 0, "Open       -  i "),
+                ("", ("t", "pr", "1", "4"), 1, "Invalid priority"),
+                ("", ("t", "pr", "1"), 1, "Usage"),
+                ("", ("t", "pr", "x", "1"), 1, "Invalid"),
+                ("", ("t", "pr", "9", "1"), 1, "does not exist"),
+                ("", ("t", "pr", "1.1", "-"), 0, "Pending    -  c  Child"),
+                ("", ("t", "ls"), 0, "-  i  An item\n1.1  Pending    -  c"),
+                ("", ("t", "di", "pr"), 0, ""),
+                ("", ("t", "ls"), 0, "Open       i  An item\n1.1  Pending"),
                 ("", ("t", "ref", "1.1"), 0, "Reference"),
                 ("", ("t", "open"), 1, "Usage"),
                 ("", ("t", "close", "9"), 1, "does not exist"),
@@ -1096,7 +1425,8 @@ class Items:
                 ("", ("t", "rename", "x", "y"), 1, "Invalid"),
                 ("", ("t", "rename", "9", "Nine"), 1, "does not exist"),
                 ("", ("t", "create", "2", "Doomed"), 0, ""),
-                ("", ("t", "d", "2"), 0, "Doomed"),
+                ("", ("t", "d", "2"), 1, "delete, disable"),
+                ("", ("t", "del", "2"), 0, "Doomed"),
                 ("", ("t", "delete"), 1, "Usage"),
                 ("", ("t", "delete", "x"), 1, "Invalid"),
                 ("", ("t", "delete", "-r", "9"), 1, "No items match"),
@@ -1213,11 +1543,26 @@ class Items:
             "Unable to write" in str(items.set_state((1,), "Closed")),
             "set_state write failure",
         )
+        check(
+            "Unable to write" in str(items.set_priority((1,), 2)),
+            "set_priority write failure",
+        )
         (directory / "TASKS" / "Startup.md").mkdir()
         check(
             "Unable to write" in write_startup([items]),
             "write_startup failure",
         )
+        for text, message in (
+            ("{", "Unable to read"), ("[]", "not a JSON object")
+        ):
+            bad: Path = directory / "bad_collection"
+            bad.mkdir(exist_ok=True)
+            write_file(bad / COLLECTION_FILE, text)
+            with contextlib.redirect_stderr(io.StringIO()):
+                check(
+                    message in Items(bad).error,
+                    f"reject .tracker.json {text!r}",
+                )
         if os.geteuid() == 0:
             # Permissions are not enforced for root.
             return  # pragma: no cover
@@ -1233,6 +1578,27 @@ class Items:
             )
         finally:
             read_only.chmod(0o700)
+        write_file(read_only / COLLECTION_FILE, "{}\n")
+        (read_only / COLLECTION_FILE).chmod(0o400)
+        collection: Items = Items(read_only)
+        check(
+            "Unable to write" in collection.set_feature("priority", True),
+            "set_feature write failure",
+        )
+        (read_only / COLLECTION_FILE).chmod(0o600)
+        untagged: Path = read_only / "1_Untagged"
+        untagged.mkdir()
+        write_item(untagged, new_metadata("Open", "2026-01-01T00:00:00Z"))
+        write_file(untagged / "Details.md", "# 1 Untagged\n")
+        (untagged / ITEM_FILE).chmod(0o400)
+        errors = io.StringIO()
+        with contextlib.redirect_stderr(errors):
+            items = Items(read_only)
+        check(
+            "Unable to add tag" in errors.getvalue()
+            and items.items[(1,)].tag == "",
+            "add_missing_tags write failure",
+        )
 
     @staticmethod
     def create_collection(
@@ -1351,6 +1717,10 @@ class Items:
                 error = items.rename_command(rest)
             case "delete":
                 error = items.delete_command(rest)
+            case "priority":
+                error = items.priority_command(rest)
+            case "enable" | "disable":
+                error = items.feature_command(commands[0], rest)
             case state_command:
                 error = items.state_command(state_command, rest)
         if not error:
@@ -1410,16 +1780,25 @@ def write_startup(collections: list["Items"]) -> str:
     return ""
 
 
-def print_items(items: list[Item], long: bool = False) -> None:
-    """Print one line per item with its number, state and title.
+def print_items(
+    items: list[Item], long: bool = False, priority: bool = False
+) -> None:
+    """Print one line per item: number, state, priority, tag and title.
 
-    If `long`, the created and updated times are also printed in the
-    local time zone.
+    The priority is only printed if `priority`, with "-" for none.  If
+    `long`, the created and updated times are also printed in the local
+    time zone.
     """
     width: int = max((len(item.number) for item in items), default=0)
+    tag_width: int = max((len(item.tag) for item in items), default=0)
     state_width: int = max(len(state) for state in STATES)
     time_width: int = len("YYYY-MM-DD HH:MM")
     for item in items:
+        levels: str = (
+            f"{'-' if item.priority is None else item.priority}  "
+            if priority
+            else ""
+        )
         times: str = (
             f"{local_time(item.created):<{time_width}}  "
             f"{local_time(item.updated):<{time_width}}  "
@@ -1428,7 +1807,8 @@ def print_items(items: list[Item], long: bool = False) -> None:
         )
         print(
             f"{item.number:<{width}}  "
-            f"{item.state:<{state_width}}  {times}{item.title}"
+            f"{item.state:<{state_width}}  "
+            f"{levels}{item.tag:<{tag_width}}  {times}{item.title}"
         )
 
 

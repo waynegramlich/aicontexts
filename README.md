@@ -18,6 +18,17 @@ with the following information:
   A short one line description of the item (e.g. `Initialization Fails`.)
 * Number:
   A unique hierarchical number (e.g. `1.2.3`) used for sorting.
+* Tag:
+  A short name made from the first letter of each word of the Title in
+  lower case, ignoring "a", "an", "of" and "the" (e.g. `Division by Zero
+  is Bad` is `dbzib`.)  A tag is unique within its collection; when it
+  would clash, the newer Item gets the lowest free number added (e.g.
+  `cde2`.)  A tag never changes on its own, since tags show up in commit
+  messages and the like.  Tags are meant for referring to Items in text.
+* Priority:
+  An optional level: 0 (catastrophic), 1 (high), 2 (medium) or 3 (low).
+  Priority is enabled per collection (`tracker i enable priority`); then
+  `ls` shows it and lists Items by priority first.
 * State:
   The state of the item: Pending, Open, Reference, Suspended or Closed.
   New items start out Pending.  A Reference item is not being worked on,
@@ -28,8 +39,9 @@ with the following information:
 * `Context.md`:
   A file managed by an AI LLM that has additional AI context information.
 * `.item.json`:
-  A hidden file managed by `tracker` that holds the State, the created and
-  updated times (in UTC), and a history of every State change.
+  A hidden file managed by `tracker` that holds the State, Tag, Priority,
+  the created and updated times (in UTC), and a history of every State
+  change.
 
 Every time `tracker` runs, it rewrites `TASKS/Startup.md`.  It contains only
 Claude Code `@` imports: one for the `Details.md` of every Item, plus one for

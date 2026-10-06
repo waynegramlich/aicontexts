@@ -21,6 +21,21 @@ The `create` command (e.g. `tracker TASKS create 1.2.3 New Task`, or
    `open`, `reference`, `suspend` and `close` commands (e.g.
    `tracker t close 2`), never by editing this file.
 
+Each item has a tag (e.g. `dbzib` for "Division by Zero is Bad"), shown by
+`tracker t ls`.  Use the tag, in back quotes, to refer to an item in
+Markdown text.  Renaming an item can change its tag, in which case Claude
+updates every reference to the old tag in the same pass.
+
+When priority is enabled for a collection (e.g. `tracker i enable
+priority`, as it is for `ISSUES/`), items may have a priority set with
+`tracker i priority NUMBER LEVEL`, and `ls` lists them by priority first:
+* **0**: A catastrophic bug that must be avoided at all costs, such as a
+  security hole or a defect that escapes to where nobody can fix it.
+* **1**: A high priority that needs to be fixed quickly.
+* **2**: A medium priority that needs to be fixed next.
+* **3**: A low priority that gets put near the end of the list.
+`-` removes the priority.
+
 New items start out Pending.  The states are Pending, Open, Reference,
 Suspended and Closed.  A Reference item is not being worked on, but its
 `Context.md` is still loaded, so its context stays available.

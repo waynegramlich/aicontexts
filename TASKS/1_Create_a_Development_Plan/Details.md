@@ -8,3 +8,5 @@ The resulting plan:
 * Task 3 (Support Multiple Item Collections): let `tracker`
   manage several independent collections of Items (e.g. `ISSUES/`,
   `TASKS/`), each in its own directory.
+* Task 4 (Add support for Issues): create an Issues collection for
+  tracking bugs, and settle anything Issues need that Tasks do not.
