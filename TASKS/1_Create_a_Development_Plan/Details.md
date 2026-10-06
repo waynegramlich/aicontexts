@@ -21,3 +21,11 @@ The resulting plan:
 * Task 7 (Review README.md together): review `README.md` together,
   section by section, so that it describes `tracker` accurately and reads
   well for a human.
+* Task 8 (Explore moving items between collections): explore moving an
+  item from one collection to another (e.g. a Task that turns out to be an
+  Issue), including what happens to its tag prefix and to the references
+  to its old tag.
+* Task 9 (Hide closed items and check on startup): make `ls` hide Closed
+  items unless given `-a` (`--all`), and have every `tracker` command check
+  its collections for problems (done occasionally instead if checking every
+  time is too slow).

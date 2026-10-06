@@ -81,9 +81,17 @@ priority, times, state history, directory and `Details.md`.  When a rename
 changes a tag, `tracker` lists the writable `.md` files in the project
 that use the old tag and offers to update them.
 
+`tracker t ls` leaves out Closed Items (unless asked for by number or tag)
+and says how many it left out; `tracker t ls -a` lists them all.
+
 A renumbering (from a create, delete or move) first writes its plan to a
 hidden `.renumber.json` in the collection.  If it is interrupted, the next
-`tracker` command finishes it and says so.
+`tracker` command finishes it and says so.  Every command also checks the
+collections it loads, so nobody has to remember to: it fixes what `tracker`
+maintains (the number in the `# N Title` heading of `Details.md`, the
+heading of `Summary.md`) and reports what a person maintains (a missing
+heading, a title edited so that it no longer matches the directory name,
+two Items with the same tag), saying how to fix it.
 
 Run `tracker` with no arguments to list the commands.  `tracker t ls -l` also
 lists the created and updated times in the local time zone.

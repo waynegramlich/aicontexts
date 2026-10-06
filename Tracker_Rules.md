@@ -32,6 +32,10 @@ can change its tag; `tracker` then lists the `.md` files that use the old
 tag and offers to update them, and Claude answers yes (after checking the
 list) so that every reference changes in the same pass.
 
+Every `tracker` command checks its collections and prints what it fixed
+and what needs fixing.  When it reports a problem, Claude fixes it (usually
+with the `rename` command it suggests) or tells the user about it.
+
 Item numbers never have gaps.  `create` and `move` take a place: the next
 free number of a level (e.g. `1.3`), or `before NUMBER` / `after NUMBER`
 (e.g. `tracker t move T.fbm after 2.1`, or `tracker t create before 1.1

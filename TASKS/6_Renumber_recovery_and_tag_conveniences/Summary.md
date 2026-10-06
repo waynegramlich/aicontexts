@@ -11,10 +11,12 @@ closed items (`TRACKER_TEST_CLOSED_SUMMARIES`; `Details.md` if it is empty),
 and the generated `TASKS/Closed.md` lists older ones by tag and title.  The
 purpose of tracker is focused context.
 
-Development: the tests are built in (`python3 tracker.py --test`) and every
-change gets tests; also `ruff check --config ../claude_notes/ruff.toml
-tracker.py`, `flake8 --config ../claude_notes/.flake8 tracker.py` and `mypy
---strict tracker.py` (79 columns).  Coverage: `python3 -m trace --count
---missing --summary -C DIR --ignore-dir=/usr/lib tracker.py --test`; only
-`# pragma: no cover` lines may be missed.  Try changing commands in a scratch
-directory, never on the real items.
+Development: the tests are in `tracker_test.py` (`./tracker --test` or
+`python3 tracker_test.py`) and every change gets tests; also `ruff check
+tracker.py tracker_test.py`, `flake8 tracker.py tracker_test.py` (both use the
+repository's 79-column `ruff.toml` and `.flake8`) and `mypy --strict
+tracker.py tracker_test.py`.  Coverage: `python3 -m trace --count --missing
+--summary -C DIR --ignore-dir=/usr/lib tracker_test.py`, then look for
+`>>>>>>` in `DIR/*tracker.tracker.cover`; only `# pragma: no cover` blocks
+may be missed.  Try changing commands in a scratch directory, never on the
+real items.

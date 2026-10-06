@@ -1,7 +1,7 @@
 {
-  "state": "Open",
+  "state": "Pending",
   "created": "2026-10-06T15:11:26Z",
-  "updated": "2026-10-06T15:11:26Z",
+  "updated": "2026-10-06T18:25:45Z",
   "history": [
     {
       "state": "Pending",
@@ -10,6 +10,10 @@
     {
       "state": "Open",
       "time": "2026-10-06T15:11:26Z"
+    },
+    {
+      "state": "Pending",
+      "time": "2026-10-06T18:25:45Z"
     }
   ],
   "tag": "rrt"
