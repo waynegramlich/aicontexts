@@ -1,0 +1,16 @@
+{
+  "state": "Open",
+  "created": "2026-10-06T15:11:26Z",
+  "updated": "2026-10-06T15:11:26Z",
+  "history": [
+    {
+      "state": "Pending",
+      "time": "2026-10-06T15:11:26Z"
+    },
+    {
+      "state": "Open",
+      "time": "2026-10-06T15:11:26Z"
+    }
+  ],
+  "tag": "rrt"
+}

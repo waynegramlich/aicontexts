@@ -22,12 +22,15 @@ The `create` command (e.g. `tracker TASKS create 1.2.3 New Task`, or
    `tracker t close 2`), never by editing this file.
 
 Each item has a tag (e.g. `I.dbzib` for "Division by Zero is Bad" in
-`ISSUES/`), shown by `tracker t ls`.  Use the tag, in back quotes, to refer
+`ISSUES/`), shown by `tracker t ls`; `tracker I.dbzib show` shows
+everything about it.  Use the tag, in back quotes, to refer
 to an item in Markdown text and commit messages; never use item numbers,
 which change when items are deleted or moved.  Commands accept a tag
-wherever they take a number (e.g. `tracker t close T.fbm`).  Renaming an
-item can change its tag, in which case Claude updates every reference to
-the old tag in the same pass.
+wherever they take a number (e.g. `tracker t close T.fbm`), and a tag
+can stand in for its collection (`tracker T.fbm close`).  Renaming an item
+can change its tag; `tracker` then lists the `.md` files that use the old
+tag and offers to update them, and Claude answers yes (after checking the
+list) so that every reference changes in the same pass.
 
 Item numbers never have gaps.  `create` and `move` take a place: the next
 free number of a level (e.g. `1.3`), or `before NUMBER` / `after NUMBER`
@@ -50,6 +53,13 @@ priority`, as it is for `ISSUES/`), items may have a priority set with
 * **2**: A medium priority that needs to be fixed next.
 * **3**: A low priority that gets put near the end of the list.
 `-` removes the priority.
+
+Before closing an item, Claude writes a `## Summary` section near the top
+of its `Context.md`: what was decided and done, with the tags of related
+items.  Once the item is closed, only that summary (in the generated
+`TASKS/Closed.md`) is loaded at startup, so it should be enough to know
+that the item exists and what it settled.  `tracker T.fbm show` and the
+item's files give the rest when needed.
 
 New items start out Pending.  The states are Pending, Open, Reference,
 Suspended and Closed.  A Reference item is not being worked on, but its

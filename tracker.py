@@ -5,6 +5,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import shutil
 import string
 import sys
@@ -16,6 +17,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 HELP: str = """Usage: tracker COLLECTION COMMAND [ARGUMENTS...]
+       tracker TAG COMMAND [ARGUMENTS...]
+                               Same as `tracker COLLECTION COMMAND TAG ...`
+                               for the collection of TAG (e.g. I.dbzib)
        tracker NAME create     Create the collection directory NAME
        tracker --test          Run the self tests in a temporary directory
        tracker [-h | --help]   Print this help message
@@ -37,6 +41,7 @@ Commands:
                           after asking, its children too.  NUMBER may be
                           a range of siblings, like 1.2.5-6
   list [-l] [NUMBER]      List all items, or NUMBER and its children
+  show NUMBER             Show everything about an item
   ls [-l] [NUMBER]        Same as list
   pending [-r] NUMBER     Set the item state to Pending
   open [-r] NUMBER        Set the item state to Open
@@ -69,6 +74,9 @@ continue.
 Item states are: Pending, Open, Reference, Suspended, Closed
 New items are created Pending.  Open items are being worked on.  Reference
 items are not, but like Open items their Context.md is in Startup.md.
+Closed items are listed in a generated TASKS/Closed.md instead: the 50
+most recently closed with the "## Summary" section of their Context.md,
+the rest by tag and title only.
 
 Each item has a tag: the capitalized first letter of its collection and a
 period, then the first letter of each word of its title in lower case,
@@ -96,6 +104,34 @@ OLD_STATUS_FILE: str = ".status"
 
 # The hidden JSON file that marks a directory as a collection of items.
 COLLECTION_FILE: str = ".tracker.json"
+
+# The hidden JSON file that holds a renumbering while it is being done, so
+# that an interrupted renumbering can be finished.
+RENUMBER_FILE: str = ".renumber.json"
+
+# The environment variable with which the test suite interrupts a
+# renumbering after that many steps.
+INTERRUPT_VARIABLE: str = "TRACKER_TEST_RENUMBER_INTERRUPT"
+
+# The commands whose first argument is an item, so that `tracker TAG
+# COMMAND ...` can be used.
+TAG_COMMANDS: frozenset[str] = frozenset(
+    {
+        "rename", "delete", "list", "show", "pending", "open", "reference",
+        "suspend", "close", "priority", "move",
+    }
+)
+
+# The number of most recently closed items that `Closed.md` summarizes;
+# the test suite can change it with the environment variable named by
+# `SUMMARIES_VARIABLE`.
+CLOSED_SUMMARIES: int = 50
+SUMMARIES_VARIABLE: str = "TRACKER_TEST_CLOSED_SUMMARIES"
+
+# The keys of each rename in `.renumber.json`.
+RENAME_KEYS: tuple[str, ...] = (
+    "old", "temporary", "new", "old_number", "new_number"
+)
 
 # The collection that holds `Startup.md` for all of the collections.
 STARTUP_COLLECTION: str = "TASKS"
@@ -135,10 +171,16 @@ COMMANDS: dict[str, str] = {
     "close": "close",
     "priority": "priority",
     "move": "move",
+    "show": "show",
     "enable": "enable",
     "disable": "disable",
     "help": "help",
 }
+
+
+class RenumberInterrupted(Exception):
+    """A renumbering interrupted by the test suite (`INTERRUPT_VARIABLE`)."""
+
 
 # A test check: called with a condition that should be true and a description.
 Check = Callable[[bool, str], None]
@@ -347,6 +389,50 @@ def tag_prefix(collection_name: str) -> str:
     return f"{collection_name[:1].upper()}."
 
 
+def tag_collection(word: str, names: list[str]) -> str:
+    """Return the collection of `names` whose tag prefix starts `word`.
+
+    Returns an empty string unless `word` looks like a tag (e.g. "I.dbzib")
+    and its prefix belongs to one of the `names`.
+    """
+    if len(word) < 3 or word[1] != ".":
+        return ""
+    return next(
+        (name for name in names if tag_prefix(name) == word[:2].upper()), ""
+    )
+
+
+def tag_references(root: Path, tag: str) -> list[Path]:
+    """Return the writable `.md` files under `root` that mention `tag`.
+
+    Hidden directories (like `.git`) and symbolic links are skipped.  A
+    mention is the whole tag, so "T.fbm" is not found in "T.fbm2" or
+    "XT.fbm".
+    """
+    pattern: re.Pattern[str] = tag_pattern(tag)
+    found: list[Path] = []
+    for directory, subdirectories, file_names in os.walk(root):
+        subdirectories[:] = sorted(
+            name for name in subdirectories if not name.startswith(".")
+        )
+        for file_name in sorted(file_names):
+            path: Path = Path(directory) / file_name
+            if (
+                file_name.endswith(".md")
+                and not path.is_symlink()
+                and os.access(path, os.W_OK)
+            ):
+                with contextlib.suppress(OSError, UnicodeDecodeError):
+                    if pattern.search(read_file(path)):
+                        found.append(path)
+    return found
+
+
+def tag_pattern(tag: str) -> re.Pattern[str]:
+    """Return a pattern that finds the whole `tag` in text."""
+    return re.compile(rf"(?<![\w.]){re.escape(tag)}(?!\w)")
+
+
 def parse_number(number: str) -> tuple[int, ...] | str:
     """Convert a number like "1.2.3" into a name like (1, 2, 3).
 
@@ -502,6 +588,7 @@ class Items:
         if self.error:
             print(self.error, file=sys.stderr)
         else:
+            self.recover_renumber()
             self.load_items()
 
     @property
@@ -712,45 +799,142 @@ class Items:
 
         Each item directory is renamed (via a temporary name, so that the
         new names can not collide with the old ones) and the heading of
-        its `Details.md` is rewritten.  Returns an empty string on
-        success, or an error string on failure.
+        its `Details.md` is rewritten.  The plan is first written to
+        `.renumber.json`, which is removed at the end, so that an
+        interrupted renumbering is finished the next time the collection
+        is loaded.  Returns an empty string on success, or an error string
+        on failure.
         """
-        moving: list[tuple[Item, Path, str]] = []
+        if not new_names:
+            return ""
+        renames: list[dict[str, str]] = []
+        for index, old in enumerate(sorted(new_names)):
+            title_part: str = self.directories[old].name.partition("_")[2]
+            renames.append(
+                {
+                    "old": self.directories[old].name,
+                    "temporary": f".renumber_{index}",
+                    "new": f"{number_text(new_names[old])}_{title_part}",
+                    "old_number": number_text(old),
+                    "new_number": number_text(new_names[old]),
+                }
+            )
+        error: str = self.do_renumber(renames, 1)
+        if error and not (self.items_directory / RENUMBER_FILE).exists():
+            return error
+        # Even after a failure, the items are where the plan puts them,
+        # since the next load finishes the plan.
+        moving: list[Item] = [self.items[old] for old in sorted(new_names)]
+        for item in moving:
+            del self.items[item.name]
+            del self.directories[item.name]
+        for item, rename in zip(moving, renames, strict=True):
+            item.name = new_names[item.name]
+            self.items[item.name] = item
+            self.directories[item.name] = (
+                self.items_directory / rename["new"]
+            )
+        return error
+
+    def do_renumber(self, renames: list[dict[str, str]], phase: int) -> str:
+        """Do the `renames` of a renumbering, starting at `phase`.
+
+        Phase 1 renames the old directories to temporary names, phase 2
+        renames those to the new names, and phase 3 rewrites the headings.
+        Each step is skipped if it has already been done, and
+        `.renumber.json` records the phase until the end, when it is
+        removed.  Returns an empty string on success, or an error string
+        on failure.
+        """
+        marker: Path = self.items_directory / RENUMBER_FILE
+        limit: str = os.environ.get(INTERRUPT_VARIABLE, "")
+        steps: list[int] = [0]
+
+        def step() -> None:
+            steps[0] += 1
+            if limit.isdecimal() and steps[0] > int(limit):
+                raise RenumberInterrupted
+
+        def path(rename: dict[str, str], key: str) -> Path:
+            return self.items_directory / rename[key]
+
         try:
-            for index, old in enumerate(sorted(new_names)):
-                temporary: Path = self.items_directory / f".renumber_{index}"
-                title_part: str = self.directories[old].name.partition("_")[2]
-                self.directories[old].rename(temporary)
-                moving.append((self.items[old], temporary, title_part))
-            # All of the old names go first, since a new name may be the old
-            # name of an item that has not been given its new name yet.
-            for item, _, _ in moving:
-                del self.items[item.name]
-                del self.directories[item.name]
-            for item, temporary, title_part in moving:
-                old_number: str = item.number
-                new: tuple[int, ...] = new_names[item.name]
-                new_directory: Path = (
-                    self.items_directory / f"{number_text(new)}_{title_part}"
+            write_file(
+                marker,
+                json.dumps({"phase": phase, "renames": renames}, indent=2)
+                + "\n",
+            )
+            if phase == 1:
+                for rename in renames:
+                    if path(rename, "old").exists() and not path(
+                        rename, "temporary"
+                    ).exists():
+                        step()
+                        path(rename, "old").rename(path(rename, "temporary"))
+                write_file(
+                    marker,
+                    json.dumps({"phase": 2, "renames": renames}, indent=2)
+                    + "\n",
                 )
-                temporary.rename(new_directory)
-                item.name = new
-                self.items[new] = item
-                self.directories[new] = new_directory
-                details_path: Path = new_directory / "Details.md"
+            for rename in renames:
+                if path(rename, "temporary").exists():
+                    step()
+                    path(rename, "temporary").rename(path(rename, "new"))
+            for rename in renames:
+                details_path: Path = path(rename, "new") / "Details.md"
                 details: str = read_file(details_path)
-                prefix: str = f"# {old_number} "
+                prefix: str = f"# {rename['old_number']} "
                 if details.startswith(prefix):
+                    step()
                     write_file(
                         details_path,
-                        f"# {number_text(new)} {details[len(prefix):]}",
+                        f"# {rename['new_number']} {details[len(prefix):]}",
                     )
+            marker.unlink()
         except OSError as error:
             return (
                 f"Unable to renumber items in '{self.items_directory}': "
                 f"{error}"
             )
         return ""
+
+    def recover_renumber(self) -> None:
+        """Finish an interrupted renumbering, if there is one.
+
+        The recovery, or a failure to recover, is reported to stderr.
+        """
+        marker: Path = self.items_directory / RENUMBER_FILE
+        if not marker.exists():
+            return
+        error: str = ""
+        try:
+            plan: object = json.loads(read_file(marker))
+            if not isinstance(plan, dict):
+                raise TypeError("it is not a JSON object")
+            phase: int = int(plan["phase"])
+            renames: list[dict[str, str]] = [
+                {key: str(rename[key]) for key in RENAME_KEYS}
+                for rename in plan["renames"]
+            ]
+        except (OSError, ValueError, TypeError, KeyError) as problem:
+            error = f"Unable to read '{marker}': {problem!r}"
+        else:
+            error = self.do_renumber(renames, phase)
+        if error:
+            print(
+                f"Unable to finish an interrupted renumbering: {error}",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"Finished an interrupted renumbering in "
+                f"'{self.items_directory}': "
+                + ", ".join(
+                    f"{rename['old_number']} -> {rename['new_number']}"
+                    for rename in renames
+                ),
+                file=sys.stderr,
+            )
 
     def fix_gaps(self) -> None:
         """Renumber the items if there are gaps, reporting it to stderr.
@@ -1319,6 +1503,53 @@ class Items:
         self.show_renumbered(renumbered)
         return ""
 
+    def show_command(self, arguments: list[str]) -> str:
+        """Run `show NUMBER`: print an item's details and its `Details.md`.
+
+        Returns an empty string on success, or an error string on failure.
+        """
+        if len(arguments) != 1:
+            return "Usage: tracker COLLECTION show NUMBER"
+        name: tuple[int, ...] | str = self.resolve(arguments[0])
+        if isinstance(name, str):
+            return name
+        if name not in self.items:
+            return f"Item '{number_text(name)}' does not exist"
+        item: Item = self.items[name]
+        item_directory: Path = self.directories[name]
+        try:
+            metadata: dict[str, object] = read_item(item_directory)
+            details: str = read_file(item_directory / "Details.md")
+        except (OSError, ValueError) as error:
+            return f"Unable to read item '{item.number}': {error}"
+        lines: list[str] = [
+            f"Number:    {item.number}",
+            f"Tag:       {self.prefix}{item.tag}",
+            f"Title:     {item.title}",
+            f"State:     {item.state}",
+        ]
+        if self.priority_enabled:
+            lines.append(
+                "Priority:  "
+                f"{'-' if item.priority is None else item.priority}"
+            )
+        lines += [
+            f"Created:   {local_time(item.created)}",
+            f"Updated:   {local_time(item.updated)}",
+            f"Directory: {item_directory.parent.name}/{item_directory.name}",
+            "History:",
+        ]
+        history: object = metadata.get("history")
+        for change in history if isinstance(history, list) else []:
+            if isinstance(change, dict):
+                lines.append(
+                    f"  {local_time(str(change.get('time', ''))):<16}  "
+                    f"{change.get('state', '?')}"
+                )
+        print("\n".join(lines) + "\n")
+        print(details, end="")
+        return ""
+
     def show_renumbered(self, renumbered: dict[str, Item]) -> None:
         """Print the `renumbered` items, keyed by their old numbers."""
         if renumbered:
@@ -1403,6 +1634,7 @@ class Items:
             return f"Item '{number_text(name)}' has an empty title"
         if not self.confirm_snapshot(ask):
             return "Not renamed"
+        old_tag: str = f"{self.prefix}{self.items[name].tag}"
         renamed: Item | str = self.rename_item(name, title)
         if isinstance(renamed, str):
             return renamed
@@ -1410,6 +1642,41 @@ class Items:
         if error:
             return error
         self.show([renamed])
+        new_tag: str = f"{self.prefix}{renamed.tag}"
+        if new_tag == old_tag:
+            return ""
+        return self.update_references(old_tag, new_tag, ask)
+
+    def update_references(
+        self, old_tag: str, new_tag: str, ask: Callable[[str], str]
+    ) -> str:
+        """Offer to change `old_tag` to `new_tag` in the project's `.md` files.
+
+        The files are found by `tag_references()` in the directory that
+        holds the collections, and are only changed if `ask` gets a yes.
+        Returns an empty string on success, or an error string on failure.
+        """
+        root: Path = self.items_directory.parent
+        paths: list[Path] = tag_references(root, old_tag)
+        if not paths:
+            return ""
+        print("The following `.md` files have tags that need to be renamed:")
+        for path in paths:
+            print(f"  {path.relative_to(root)}")
+        try:
+            answer: str = ask("OK to update them? (y=Yes, n=No) ")
+        except EOFError:
+            answer = ""
+        if answer.strip().casefold() not in ("y", "yes"):
+            print(f"Not updated; {old_tag} is still used in them")
+            return ""
+        pattern: re.Pattern[str] = tag_pattern(old_tag)
+        for path in paths:
+            try:
+                write_file(path, pattern.sub(new_tag, read_file(path)))
+            except OSError as error:
+                return f"Unable to update '{path}': {error}"
+        print(f"Updated {old_tag} to {new_tag} in {len(paths)} files")
         return ""
 
     def delete_command(
@@ -1467,6 +1734,9 @@ class Items:
             Items._test_rename_delete(check, root / "rename_delete")
             Items._test_numbering(check, root / "numbering")
             Items._test_moving(check, root / "moving")
+            Items._test_recovery(check, root / "recovery")
+            Items._test_references(check, root / "references")
+            Items._test_closed(check, root / "closed")
             Items._test_write_failures(check, root / "failures")
             Items._test_errors(check, root / "errors")
         # The commands search upward for collections, so they are tested
@@ -2097,6 +2367,241 @@ class Items:
         )
 
     @staticmethod
+    def _test_recovery(check: Check, directory: Path) -> None:
+        """Test finishing a renumbering interrupted after every step."""
+        directory.mkdir()
+        interruptions: int = 0
+        for limit in range(12):
+            collection: Path = directory / f"after_{limit}"
+            items: Items = Items(collection)
+            # Same titles, so new directory names are old ones.
+            for number, title in (
+                ("1", "Notes"), ("1.1", "Child"), ("2", "Notes")
+            ):
+                items.create_item(number, title)
+            os.environ[INTERRUPT_VARIABLE] = str(limit)
+            interrupted: bool = False
+            try:
+                items.move_items([(2,)], "before", (1,))
+            except RenumberInterrupted:
+                interrupted = True
+            finally:
+                del os.environ[INTERRUPT_VARIABLE]
+            interruptions += interrupted
+            errors: io.StringIO = io.StringIO()
+            with contextlib.redirect_stderr(errors):
+                reloaded: Items = Items(collection)
+            check(
+                [(item.number, item.tag) for item in reloaded.list_items()]
+                == [("1", "n2"), ("2", "n"), ("2.1", "c")]
+                and all(
+                    read_file(reloaded.directories[item.name] / "Details.md")
+                    == f"# {item.number} {item.title}\n"
+                    for item in reloaded.list_items()
+                )
+                and not (collection / RENUMBER_FILE).exists()
+                and not any(collection.glob(".renumber_*"))
+                and ("Finished an interrupted" in errors.getvalue())
+                == interrupted,
+                f"finish a renumbering interrupted after {limit} steps",
+            )
+        check(interruptions == 9, "a renumbering has nine steps")
+        for text, message in (
+            ("{", "Unable to read"),
+            ("[]", "not a JSON object"),
+            ('{"phase": 2, "renames": [{"old": "x"}]}', "KeyError"),
+        ):
+            write_file(directory / "after_0" / RENUMBER_FILE, text)
+            errors = io.StringIO()
+            with contextlib.redirect_stderr(errors):
+                Items(directory / "after_0")
+            check(
+                "Unable to finish an interrupted" in errors.getvalue()
+                and message in errors.getvalue(),
+                f"report a damaged {RENUMBER_FILE}: {text}",
+            )
+
+    @staticmethod
+    def _test_references(check: Check, directory: Path) -> None:
+        """Test finding and updating references to a renamed tag."""
+        directory.mkdir()
+        items: Items = Items(directory / "TASKS")
+        items.create_item("1", "Fix Big Mistake")
+        text: str = "See T.fbm, T.fbm2, XT.fbm and `T.fbm`.\n"
+        for relative in (
+            "notes.md", "sub/deep.md", ".hidden/skipped.md", "other.txt"
+        ):
+            (directory / relative).parent.mkdir(exist_ok=True)
+            write_file(directory / relative, text)
+        (directory / "link.md").symlink_to(directory / "notes.md")
+        questions: list[str] = []
+        answers: list[str] = []
+
+        def ask(question: str) -> str:
+            questions.append(question)
+            if not answers:
+                raise EOFError
+            return answers.pop(0)
+
+        def rename(*words: str) -> str:
+            output: io.StringIO = io.StringIO()
+            with (
+                contextlib.redirect_stdout(output),
+                contextlib.redirect_stderr(output),
+            ):
+                error: str = items.rename_command(["1", "to", *words], ask)
+            return error + output.getvalue()
+
+        answers[:] = ["y", "n"]
+        output: str = rename("Good", "Fix")
+        check(
+            "The following `.md` files have tags that need to be renamed:\n"
+            "  notes.md\n  sub/deep.md\nNot updated; T.fbm is still used"
+            in output
+            and questions[-1] == "OK to update them? (y=Yes, n=No) "
+            and read_file(directory / "notes.md") == text,
+            "list the references to a changed tag and leave them",
+        )
+        answers[:] = []
+        check(
+            "following" not in rename("Fix", "Big", "Mistake")
+            and "following" not in rename("Fix", "Big", "Mistakes"),
+            "no question without references or without a new tag",
+        )
+        answers[:] = ["yes"]
+        output = rename("Good", "Fix")
+        updated: str = "See T.gf, T.fbm2, XT.fbm and `T.gf`.\n"
+        check(
+            "Updated T.fbm to T.gf in 2 files" in output
+            and read_file(directory / "notes.md") == updated
+            and read_file(directory / "sub" / "deep.md") == updated
+            and read_file(directory / ".hidden" / "skipped.md") == text
+            and read_file(directory / "other.txt") == text,
+            "update the references to a changed tag",
+        )
+        if os.geteuid() == 0:
+            # Permissions are not enforced for root.
+            return  # pragma: no cover
+        (directory / "sub" / "deep.md").chmod(0o444)
+        rename("Fix", "Big", "Mistake")
+        check(
+            tag_references(directory, "T.gf") == [directory / "notes.md"],
+            "read-only files are not references",
+        )
+        (directory / "sub" / "deep.md").chmod(0o644)
+
+        def refuse_writes(question: str) -> str:
+            (directory / "notes.md").chmod(0o444)
+            return "y"
+
+        write_file(directory / "notes.md", "T.fbm\n")
+        with contextlib.redirect_stdout(io.StringIO()):
+            check(
+                "Unable to update" in items.rename_command(
+                    ["1", "to", "Good", "Fix"], refuse_writes
+                ),
+                "report a reference that can not be updated",
+            )
+
+    @staticmethod
+    def _test_closed(check: Check, directory: Path) -> None:
+        """Test `Closed.md` and leaving Closed items out of `Startup.md`."""
+        directory.mkdir()
+        tasks: Items = Items(directory / "TASKS")
+        issues: Items = Items(directory / "ISSUES")
+        for number, title in (("1", "Alpha"), ("2", "Beta"), ("3", "Gamma")):
+            tasks.create_item(number, title)
+        issues.create_item("1", "Crash")
+        write_file(
+            tasks.directories[(1,)] / "Context.md",
+            "# LLM Agent Context Log\n\n## Summary\n\nAlpha is done.\n\n"
+            "It went well.\n\n## 2026-10-06\n\nNotes.\n",
+        )
+        write_file(
+            issues.directories[(1,)] / "Context.md",
+            "## SUMMARY\nFixed the crash.\n",
+        )
+        # Closed in this order, a day apart.
+        for collection, name, date in (
+            (tasks, (2,), 1), (issues, (1,), 2), (tasks, (1,), 3)
+        ):
+            collection.set_state(name, "Closed")
+            metadata: dict[str, object] = read_item(
+                collection.directories[name]
+            )
+            history: object = metadata["history"]
+            if isinstance(history, list):
+                history[-1]["time"] = f"2026-10-0{date}T12:00:00Z"
+            write_item(collection.directories[name], metadata)
+        saved: str | None = os.environ.pop(SUMMARIES_VARIABLE, None)
+        try:
+            os.environ[SUMMARIES_VARIABLE] = "2"
+            check(write_startup([issues, tasks]) == "", "write Closed.md")
+            check(
+                read_file(directory / "TASKS" / "Startup.md")
+                == "@3_Gamma/Details.md\n@Closed.md\n",
+                "Startup.md imports Closed.md instead of closed items",
+            )
+            third: str = local_time("2026-10-03T12:00:00Z")[:10]
+            second: str = local_time("2026-10-02T12:00:00Z")[:10]
+            check(
+                read_file(directory / "TASKS" / "Closed.md")
+                == "# Closed Items\n\n"
+                "<!-- Written by tracker; do not edit. -->\n\n"
+                "The most recently closed items (up to 2), with summaries:\n"
+                f"\n- `T.a` Alpha (closed {third}):\n"
+                "  Alpha is done.\n\n  It went well.\n"
+                f"- `I.c` Crash (closed {second}):\n"
+                "  Fixed the crash.\n\nOlder closed items:\n\n"
+                "- `T.b` Beta\n",
+                "Closed.md contents",
+            )
+            os.environ[SUMMARIES_VARIABLE] = "junk"
+            write_startup([issues, tasks])
+            check(
+                "Older" not in read_file(directory / "TASKS" / "Closed.md")
+                and "- `T.b` Beta (closed" in read_file(
+                    directory / "TASKS" / "Closed.md"
+                )
+                and "(no summary)" in read_file(
+                    directory / "TASKS" / "Closed.md"
+                ),
+                f"{CLOSED_SUMMARIES} summaries by default",
+            )
+        finally:
+            del os.environ[SUMMARIES_VARIABLE]
+            if saved is not None:
+                os.environ[SUMMARIES_VARIABLE] = saved  # pragma: no cover
+        (tasks.directories[(2,)] / "Context.md").unlink()
+        write_file(tasks.directories[(2,)] / ITEM_FILE, "[]")
+        check(
+            context_summary(tasks.directories[(2,)]) == ""
+            and closed_time(tasks.items[(2,)], tasks.directories[(2,)])
+            == tasks.items[(2,)].updated,
+            "a closed item without a summary or a readable history",
+        )
+        (directory / "TASKS" / "Closed.md").unlink()
+        (directory / "TASKS" / "Closed.md").mkdir()
+        check(
+            "Unable to write" in write_startup([issues, tasks]),
+            "Closed.md can not be written",
+        )
+        for collection, name in ((tasks, (1,)), (tasks, (2,)), (issues, (1,))):
+            collection.items[name].state = "Open"
+        check(
+            "Unable to write" in write_startup([issues, tasks]),
+            "Closed.md can not be removed",
+        )
+        (directory / "TASKS" / "Closed.md").rmdir()
+        check(
+            write_startup([issues, tasks]) == ""
+            and not (directory / "TASKS" / "Closed.md").exists()
+            and "@Closed.md"
+            not in read_file(directory / "TASKS" / "Startup.md"),
+            "no Closed.md without closed items",
+        )
+
+    @staticmethod
     def _test_write_failures(check: Check, directory: Path) -> None:
         """Test failing to write while renumbering or noting the time."""
         if os.geteuid() == 0:
@@ -2142,6 +2647,17 @@ class Items:
                 in commands.rename_command(["1", "to", "Taken"], yes),
                 "a confirmed move or rename can still fail",
             )
+        marker: Items = collection("marker")
+        (directory / "marker").chmod(0o500)
+        try:
+            check(
+                "Unable to renumber"
+                in str(marker.move_items([(2,)], "before", (1,)))
+                and marker.items[(1,)].title == "A",
+                f"no renumbering without {RENUMBER_FILE}",
+            )
+        finally:
+            (directory / "marker").chmod(0o700)
         move: Items = collection("move")
         (move.directories[(2,)] / "Details.md").chmod(0o400)
         check(
@@ -2288,7 +2804,8 @@ class Items:
                 ("", ("t", "li", "--long", "1.1"), 0, "Child"),
                 ("", ("t", "ls", "-l", "1", "2"), 1, "Usage"),
                 ("", ("t", "cl", "1"), 0, "Closed"),
-                ("", ("t", "s", "--recursive", "1"), 0, "1.1"),
+                ("", ("t", "s", "1"), 1, "show, suspend"),
+                ("", ("t", "su", "--recursive", "1"), 0, "1.1"),
                 ("", ("t", "o", "-r", "1"), 0, "Open"),
                 ("", ("t", "pe", "1.1"), 0, "Pending"),
                 ("", ("t", "p", "1.1"), 1, "pending, priority"),
@@ -2298,6 +2815,7 @@ class Items:
                 ("", ("t", "en", "x"), 1, "FEATURE is one of"),
                 ("", ("t", "en", "p", "q"), 1, "FEATURE is one of"),
                 ("", ("t", "en", "p"), 0, ""),
+                ("", ("t", "sh", "1"), 0, "State:     Open\nPriority:  -\n"),
                 ("", ("t", "pr", "1.1", "0"), 0, "Pending    0  T.c  Child"),
                 ("", ("t", "ls"), 0, "0  T.c  Child\n1    Open       -  T.i"),
                 ("", ("t", "pr", "1", "1"), 0, "Open       1  T.i "),
@@ -2341,6 +2859,15 @@ class Items:
                 ("", ("i", "create", "1", "Crash"), 0, ""),
                 ("", ("I", "OPEN", "1"), 0, "Open"),
                 ("", ("i", "ls"), 0, "I.c  Crash"),
+                ("", ("I.c", "show"), 0, "Tag:       I.c\nTitle:     Crash"),
+                ("", ("i.C", "sh"), 0, "  Open\n\n# 1 Crash\n"),
+                ("", ("t", "sh"), 1, "Usage"),
+                ("", ("t", "sh", "9"), 1, "'9' does not exist"),
+                ("", ("t", "sh", "x"), 1, "Invalid"),
+                ("", ("t.I", "ls"), 0, "T.i "),
+                ("", ("T.i", "cr", "x"), 1, "can not be used with 'create'"),
+                ("", ("T.zz", "show"), 1, "Invalid item number or tag 'T.zz'"),
+                ("", ("Z.x", "ls"), 1, "No collection matches 'Z.x'"),
                 ("", ("t", "ls", "T.i"), 0, "T.i   An item\n1.1"),
                 ("", ("t", "cl", "t.I"), 0, "Closed     T.i "),
                 ("", ("t", "o", "i"), 0, "Open       T.i "),
@@ -2488,6 +3015,10 @@ class Items:
             "set_state write failure",
         )
         check(
+            "Unable to read item '1'" in items.show_command(["1"]),
+            "show a damaged item",
+        )
+        check(
             "Unable to write" in str(items.set_priority((1,), 2)),
             "set_priority write failure",
         )
@@ -2620,6 +3151,10 @@ class Items:
         directories: list[Path] = find_collections(Path.cwd())
         names: list[str] = [directory.name for directory in directories]
         found: list[str] = matches(arguments[0], names)
+        tag: str = ""
+        if not found and tag_collection(arguments[0], names):
+            found = [tag_collection(arguments[0], names)]
+            tag = arguments[0]
         commands: list[str] = (
             sorted(
                 {COMMANDS[name] for name in matches(arguments[1], COMMANDS)}
@@ -2646,6 +3181,8 @@ class Items:
                 f"'{arguments[1]}' matches more than one command: "
                 f"{', '.join(commands)}"
             )
+        elif tag and commands[0] not in TAG_COMMANDS:
+            error = f"A tag can not be used with '{commands[0]}'"
         elif not found and commands == ["create"] and len(arguments) == 2:
             return Items.create_collection(arguments[0], directories, ask)
         elif not found:
@@ -2662,7 +3199,7 @@ class Items:
         items: Items = collections[names.index(found[0])]
         if items.error:
             return 1
-        rest: list[str] = arguments[2:]
+        rest: list[str] = ([tag] if tag else []) + arguments[2:]
         match commands[0]:
             case "help":
                 print(HELP)
@@ -2678,6 +3215,8 @@ class Items:
                 error = items.priority_command(rest)
             case "move":
                 error = items.move_command(rest, ask)
+            case "show":
+                error = items.show_command(rest)
             case "enable" | "disable":
                 error = items.feature_command(commands[0], rest)
             case state_command:
@@ -2697,13 +3236,16 @@ class Items:
 
 
 def write_startup(collections: list["Items"]) -> str:
-    """Write `Startup.md` into the TASKS collection, if there is one.
+    """Write `Startup.md` (and `Closed.md`) into the TASKS collection.
 
-    Every line is an `@` import, relative to the TASKS collection, of the
-    `Details.md` of every item, and the `Context.md` of every Open or
-    Reference item, so that adding `@TASKS/Startup.md` to `CLAUDE.md`
-    loads them.  The TASKS items come first, then the items of the other
-    `collections` in order.  Returns an empty string on success, or an
+    Nothing is written if there is no TASKS collection.  Every line of
+    `Startup.md` is an `@` import, relative to the TASKS collection, of
+    the `Details.md` of every item that is not Closed, and the
+    `Context.md` of every Open or Reference item, so that adding
+    `@TASKS/Startup.md` to `CLAUDE.md` loads them.  The TASKS items come
+    first, then the items of the other `collections` in order.  The
+    Closed items are written to `Closed.md` by `write_closed()`, which
+    `Startup.md` imports last.  Returns an empty string on success, or an
     error string on failure.
     """
     startup: Items | None = next(
@@ -2717,11 +3259,22 @@ def write_startup(collections: list["Items"]) -> str:
     if startup is None:
         return ""
     lines: list[str] = []
+    closed: list[tuple[str, str, str, Path]] = []
     for collection in [startup] + [
         collection for collection in collections if collection is not startup
     ]:
         for item in collection.list_items():
             item_directory: Path = collection.directories[item.name]
+            if item.state == "Closed":
+                closed.append(
+                    (
+                        closed_time(item, item_directory),
+                        f"{collection.prefix}{item.tag}",
+                        item.title,
+                        item_directory,
+                    )
+                )
+                continue
             relative: str = Path(
                 os.path.relpath(item_directory, startup.items_directory)
             ).as_posix()
@@ -2731,11 +3284,90 @@ def write_startup(collections: list["Items"]) -> str:
             for file_name in file_names:
                 if (item_directory / file_name).is_file():
                     lines.append(f"@{relative}/{file_name}")
+    if closed:
+        lines.append("@Closed.md")
     startup_path: Path = startup.items_directory / "Startup.md"
     try:
         write_file(startup_path, "".join(f"{line}\n" for line in lines))
     except OSError as error:
         return f"Unable to write '{startup_path}': {error}"
+    return write_closed(startup.items_directory / "Closed.md", closed)
+
+
+def closed_time(item: "Item", item_directory: Path) -> str:
+    """Return when `item` was last Closed, from its state history.
+
+    Returns its updated time if the history does not say.
+    """
+    with contextlib.suppress(OSError, ValueError):
+        history: object = read_item(item_directory).get("history")
+        for change in reversed(history if isinstance(history, list) else []):
+            if isinstance(change, dict) and change.get("state") == "Closed":
+                return str(change.get("time", item.updated))
+    return item.updated
+
+
+def context_summary(item_directory: Path) -> str:
+    """Return the "## Summary" section of the item's `Context.md`.
+
+    Returns an empty string if there is none.
+    """
+    try:
+        lines: list[str] = read_file(item_directory / "Context.md").split(
+            "\n"
+        )
+    except OSError:
+        return ""
+    summary: list[str] = []
+    inside: bool = False
+    for line in lines:
+        if line.startswith("#"):
+            inside = line.strip().casefold() == "## summary"
+        elif inside:
+            summary.append(line)
+    return "\n".join(summary).strip()
+
+
+def write_closed(
+    closed_path: Path, closed: list[tuple[str, str, str, Path]]
+) -> str:
+    """Write `Closed.md`, or remove it if nothing is `closed`.
+
+    `closed` holds the closed time, tag, title and directory of each
+    Closed item.  The most recently closed `CLOSED_SUMMARIES` items (or
+    the number in the `SUMMARIES_VARIABLE` environment variable) are
+    listed with their closing date and `context_summary()`, and the rest
+    by tag and title only.  Returns an empty string on success, or an
+    error string on failure.
+    """
+    limit: int = CLOSED_SUMMARIES
+    with contextlib.suppress(ValueError):
+        limit = int(os.environ.get(SUMMARIES_VARIABLE, limit))
+    ordered: list[tuple[str, str, str, Path]] = sorted(
+        closed, key=lambda entry: entry[0], reverse=True
+    )
+    lines: list[str] = [
+        "# Closed Items",
+        "",
+        "<!-- Written by tracker; do not edit. -->",
+        "",
+        f"The most recently closed items (up to {limit}), with summaries:",
+        "",
+    ]
+    for stamp, tag, title, item_directory in ordered[:limit]:
+        summary: str = context_summary(item_directory) or "(no summary)"
+        lines.append(f"- `{tag}` {title} (closed {local_time(stamp)[:10]}):")
+        lines += [f"  {line}" if line else "" for line in summary.split("\n")]
+    if ordered[limit:]:
+        lines += ["", "Older closed items:", ""]
+        lines += [f"- `{tag}` {title}" for _, tag, title, _ in ordered[limit:]]
+    try:
+        if not closed:
+            closed_path.unlink(missing_ok=True)
+        else:
+            write_file(closed_path, "\n".join(lines) + "\n")
+    except OSError as error:
+        return f"Unable to write '{closed_path}': {error}"
     return ""
 
 

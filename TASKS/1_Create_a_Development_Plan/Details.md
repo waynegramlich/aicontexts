@@ -14,3 +14,10 @@ The resulting plan:
   of gaps as items are deleted and moved around the tree (if 1.3 exists,
   1.1 and 1.2 must exist), with `delete`, `move`, `rename ... to ...`,
   `undo` and `redo` commands.
+* Task 6 (Renumber recovery and tag conveniences): recover automatically
+  from an interrupted renumber, offer to update `.md` files that refer to
+  a tag changed by a rename, let a tag alone name its collection (e.g.
+  `tracker I.dbzib close`), and add a `show` command.
+* Task 7 (Review README.md together): review `README.md` together,
+  section by section, so that it describes `tracker` accurately and reads
+  well for a human.

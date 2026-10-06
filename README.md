@@ -52,10 +52,15 @@ with the following information:
   change.
 
 Every time `tracker` runs, it rewrites `TASKS/Startup.md`.  It contains only
-Claude Code `@` imports: one for the `Details.md` of every Item, plus one for
-the `Context.md` of every Open or Reference Item, for every collection (e.g.
-`@../ISSUES/1_Crash/Details.md`).  Adding `@TASKS/Startup.md` to `CLAUDE.md`
-loads them at the start of each AI session.
+Claude Code `@` imports: one for the `Details.md` of every Item that is not
+Closed, plus one for the `Context.md` of every Open or Reference Item, for
+every collection (e.g. `@../ISSUES/1_Crash/Details.md`), and finally one for
+`TASKS/Closed.md`.  That file is also written by `tracker`: the 50 most
+recently closed Items with their closing dates and the `## Summary` section
+of their `Context.md`, then the older ones by tag and title only.  (The test
+suite changes the 50 with `TRACKER_TEST_CLOSED_SUMMARIES`.)  Adding
+`@TASKS/Startup.md` to `CLAUDE.md` loads them at the start of each AI
+session.
 
 There is no undo; use a version control system.  Before a move or rename,
 if the collection has had no move or rename for over an hour (the time is
@@ -63,6 +68,17 @@ kept in its `.tracker.json`), `tracker` recommends taking a snapshot first
 (e.g. `git commit`) and asks whether to continue.  The test suite
 shortens the hour with the `TRACKER_TEST_MOVE_RENAME_DELAY_SECONDS`
 environment variable.
+
+A tag can stand in for its collection: `tracker I.dbzib close` is the same
+as `tracker ISSUES close I.dbzib`.  `tracker t show T.fbm` (or `tracker
+T.fbm show`) shows everything about an Item: its number, tag, state,
+priority, times, state history, directory and `Details.md`.  When a rename
+changes a tag, `tracker` lists the writable `.md` files in the project
+that use the old tag and offers to update them.
+
+A renumbering (from a create, delete or move) first writes its plan to a
+hidden `.renumber.json` in the collection.  If it is interrupted, the next
+`tracker` command finishes it and says so.
 
 Run `tracker` with no arguments to list the commands.  `tracker t ls -l` also
 lists the created and updated times in the local time zone.
