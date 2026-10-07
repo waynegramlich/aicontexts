@@ -20,7 +20,8 @@ HELP: str = """Usage: tracker COLLECTION COMMAND [ARGUMENTS...]
                                for the collection of TAG (e.g. I.dbzib)
        tracker NAME create     Create the collection directory NAME
        tracker --test          Run the self tests in a temporary directory
-       tracker [-h | --help]   Print this help message
+       tracker -h | --help     Print this help message
+       tracker                 List the collections, one line each
 
 A COLLECTION is a directory containing a `.tracker.json` file.  They are
 found in the current directory, or else the nearest parent directory that
@@ -47,6 +48,7 @@ Commands:
   reference [-r] NUMBER   Set the item state to Reference
   suspend [-r] NUMBER     Set the item state to Suspended
   close [-r] NUMBER       Set the item state to Closed
+  reject [-r] NUMBER      Set the item state to Rejected
   priority NUMBER LEVEL   Set the item priority: 0 (catastrophic), 1 (high),
                           2 (medium), 3 (low), or - for none
   enable FEATURE          Enable a collection feature (only: priority)
@@ -55,7 +57,7 @@ Commands:
 
 Options:
   -r, --recursive         Also apply to all of the child items
-  -a, --all               Also list the Closed items
+  -a, --all               Also list the Closed and Rejected items
   -l, --long              Also list the created and updated times
 
 Items are numbered without gaps: if 1.3 exists, so do 1.1 and 1.2.  A
@@ -71,13 +73,15 @@ one in the collection was more than an hour ago, tracker recommends taking
 a version control snapshot (e.g. `git commit`) first, and asks whether to
 continue.
 
-Item states are: Pending, Open, Reference, Suspended, Closed
+Item states are: Pending, Open, Reference, Suspended, Closed, Rejected
 New items are created Pending.  Open items are being worked on.  Reference
 items are not, but like Open items their Context.md is in Startup.md.
-Each item also has a Summary.md, written before it is closed.  For the 50
-most recently closed items, Startup.md has their Summary.md (or Details.md
-if the summary is empty); older closed items are listed by tag and title
-in a generated TASKS/Closed.md.
+Closed items are done; Rejected items were decided against, and are
+otherwise treated like Closed ones.  Each item also has a Summary.md,
+written before it is closed or rejected.  For the 50 most recently closed
+or rejected items, Startup.md has their Summary.md (or Details.md if the
+summary is empty); older ones are listed by tag and title in a generated
+TASKS/Closed.md.
 
 Each item has a tag: the capitalized first letter of its collection and a
 period, then the first letter of each word of its title in lower case,
@@ -91,8 +95,12 @@ When priority is enabled for a collection, its items are listed by
 priority first (0 to 3, then none) and the priority is shown."""
 
 STATES: tuple[str, ...] = (
-    "Pending", "Open", "Reference", "Suspended", "Closed"
+    "Pending", "Open", "Reference", "Suspended", "Closed", "Rejected"
 )
+
+# The states of finished items, which `ls` leaves out and `Startup.md`
+# only summarizes.
+FINISHED_STATES: tuple[str, ...] = ("Closed", "Rejected")
 
 # The states whose `Context.md` is imported by `Startup.md`.
 CONTEXT_STATES: tuple[str, ...] = ("Open", "Reference")
@@ -105,6 +113,9 @@ OLD_STATUS_FILE: str = ".status"
 
 # The hidden JSON file that marks a directory as a collection of items.
 COLLECTION_FILE: str = ".tracker.json"
+
+# The version of the format of the collections, kept in `.tracker.json`.
+FORMAT_VERSION: str = "0.1"
 
 # The hidden JSON file that holds a renumbering while it is being done, so
 # that an interrupted renumbering can be finished.
@@ -171,6 +182,7 @@ COMMANDS: dict[str, str] = {
     "reference": "reference",
     "suspend": "suspend",
     "close": "close",
+    "reject": "reject",
     "priority": "priority",
     "move": "move",
     "show": "show",
@@ -594,7 +606,10 @@ class Items:
                     f"No write access to directory '{items_directory}'"
                 )
             elif not collection_path.exists():
-                write_file(collection_path, "{}\n")
+                write_file(
+                    collection_path,
+                    json.dumps({"version": FORMAT_VERSION}, indent=2) + "\n",
+                )
         except OSError as error:
             self.error = (
                 f"Unable to create directory '{items_directory}': {error}"
@@ -608,6 +623,7 @@ class Items:
             else:
                 if isinstance(settings, dict):
                     self.settings = settings
+                    self.check_version()
                 else:
                     self.error = (
                         f"Unable to read '{collection_path}': "
@@ -618,6 +634,27 @@ class Items:
         else:
             self.recover_renumber()
             self.load_items()
+
+    def check_version(self) -> None:
+        """Check the format version in `.tracker.json`.
+
+        A collection made before versions existed is given
+        `FORMAT_VERSION`; any other version than that is reported to
+        stderr, as is a failure to write the version.
+        """
+        version: object = self.settings.get("version")
+        error: str = ""
+        if version is None:
+            error = self.save_settings(
+                {"version": FORMAT_VERSION, **self.settings}
+            )
+        elif version != FORMAT_VERSION:
+            error = (
+                f"'{self.items_directory / COLLECTION_FILE}' has version "
+                f"{version!r}, but this tracker uses version {FORMAT_VERSION}"
+            )
+        if error:
+            print(error, file=sys.stderr)
 
     @property
     def prefix(self) -> str:
@@ -1687,7 +1724,8 @@ class Items:
     def list_command(self, arguments: list[str]) -> str:
         """Run `list [-a] [-l] [NUMBER]`.
 
-        Closed items are left out, unless `-a` is given or it is the item
+        Closed and Rejected items are left out, unless `-a` is given or it
+        is the item
         NUMBER itself, and a note says how many.  Returns an empty string
         on success, or an error string on failure.
         """
@@ -1714,7 +1752,7 @@ class Items:
             shown: list[Item] = [
                 item
                 for item in listed
-                if item.state != "Closed" or item.name == name
+                if item.state not in FINISHED_STATES or item.name == name
             ]
             hidden = len(listed) - len(shown)
             listed = shown
@@ -1729,7 +1767,8 @@ class Items:
         self.show(listed, long)
         if hidden:
             print(
-                f"({hidden} Closed item{'' if hidden == 1 else 's'} not "
+                f"({hidden} Closed or Rejected item"
+                f"{'' if hidden == 1 else 's'} not "
                 "shown; `ls -a` shows them)"
             )
         return ""
@@ -1751,6 +1790,7 @@ class Items:
             "reference": "Reference",
             "suspend": "Suspended",
             "close": "Closed",
+            "reject": "Rejected",
         }[command]
         changed: list[Item] | str = self.set_state(name, state, recursive)
         if isinstance(changed, str):
@@ -1913,6 +1953,49 @@ class Items:
         return 0
 
     @staticmethod
+    def list_collections() -> int:
+        """Run `tracker` with no arguments: list the collections.
+
+        Prints how many collections were found and where, a numbered line
+        for each with its tag prefix and how many items it has in each
+        state, and a pointer to the help.  Returns 0.
+        """
+        directories: list[Path] = find_collections(Path.cwd())
+        where: str = f" in '{directories[0].parent}'" if directories else ""
+        print(
+            f"{len(directories)} collection"
+            f"{'' if len(directories) == 1 else 's'} found{where}"
+            f"{':' if directories else ''}"
+        )
+        width: int = max((len(path.name) for path in directories), default=0)
+        number_width: int = len(str(len(directories)))
+        for number, directory in enumerate(directories, 1):
+            items: Items = Items(directory)
+            states: list[str] = [
+                item.state for item in items.items.values()
+            ]
+            counts: list[str] = [
+                f"{states.count(state)} {state}"
+                for state in STATES
+                if state in states
+            ]
+            total: int = len(items.items)
+            print(
+                f"{number:>{number_width}} - {directory.name:<{width}}  "
+                f"{items.prefix}  "
+                + (
+                    f"{total} item{'' if total == 1 else 's'}: "
+                    + ", ".join(counts)
+                    if total
+                    else "no items"
+                )
+            )
+        if not directories:
+            print("`tracker NAME create` creates one.")
+        print("Type: `tracker -h` for more help.")
+        return 0
+
+    @staticmethod
     def run_command(
         arguments: list[str], ask: Callable[[str], str] = input
     ) -> int:
@@ -1922,7 +2005,9 @@ class Items:
         created, and returns the answer.  Returns 0 for success and 1 for
         failure.
         """
-        if not arguments or arguments[0] in ("-h", "--help"):
+        if not arguments:
+            return Items.list_collections()
+        if arguments[0] in ("-h", "--help"):
             print(HELP)
             return 0
         if arguments == ["--test"]:  # pragma: no cover
@@ -2057,7 +2142,7 @@ def write_startup(collections: list["Items"]) -> str:
             relative: str = Path(
                 os.path.relpath(item_directory, startup.items_directory)
             ).as_posix()
-            if item.state == "Closed":
+            if item.state in FINISHED_STATES:
                 closed.append(
                     (
                         closed_time(item, item_directory),
@@ -2104,7 +2189,10 @@ def closed_time(item: "Item", item_directory: Path) -> str:
     with contextlib.suppress(OSError, ValueError):
         history: object = read_item(item_directory).get("history")
         for change in reversed(history if isinstance(history, list) else []):
-            if isinstance(change, dict) and change.get("state") == "Closed":
+            if (
+                isinstance(change, dict)
+                and change.get("state") in FINISHED_STATES
+            ):
                 return str(change.get("time", item.updated))
     return item.updated
 
@@ -2117,11 +2205,11 @@ def write_closed(closed_path: Path, older: list[tuple[str, str]]) -> str:
     success, or an error string on failure.
     """
     lines: list[str] = [
-        "# Older Closed Items",
+        "# Older Closed and Rejected Items",
         "",
         "<!-- Written by tracker; do not edit. -->",
         "",
-        "These closed items are only listed by tag and title; `tracker TAG",
+        "These items are only listed by tag and title; `tracker TAG",
         "show` shows the rest.",
         "",
     ] + [f"- `{tag}` {title}" for tag, title in older]

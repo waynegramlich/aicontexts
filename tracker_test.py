@@ -15,6 +15,7 @@ from tracker import (
     CLOSED_SUMMARIES,
     COLLECTION_FILE,
     DELAY_VARIABLE,
+    FORMAT_VERSION,
     INTERRUPT_VARIABLE,
     ITEM_FILE,
     OLD_STATUS_FILE,
@@ -197,9 +198,29 @@ def _test_items(check: Check, directory: Path) -> None:
     """Test creating, listing and changing the state of items."""
     items: Items = Items(directory)
     check(
-        not items.error and (directory / COLLECTION_FILE).is_file(),
-        "create TASKS",
+        not items.error
+        and read_file(directory / COLLECTION_FILE)
+        == f'{{\n  "version": "{FORMAT_VERSION}"\n}}\n',
+        "create TASKS with a format version",
     )
+    write_file(directory / COLLECTION_FILE, '{"priority": false}\n')
+    check(
+        Items(directory).settings
+        == {"version": FORMAT_VERSION, "priority": False}
+        and json.loads(read_file(directory / COLLECTION_FILE))["version"]
+        == FORMAT_VERSION,
+        "add the format version to an older collection",
+    )
+    write_file(directory / COLLECTION_FILE, '{"version": "9.9"}\n')
+    errors: io.StringIO = io.StringIO()
+    with contextlib.redirect_stderr(errors):
+        Items(directory)
+    check(
+        "has version '9.9', but this tracker uses version"
+        in errors.getvalue(),
+        "report another format version",
+    )
+    write_file(directory / COLLECTION_FILE, '{"version": "0.1"}\n')
     item: Item | str = items.create_item("1", "  top item  ")
     check(
         isinstance(item, Item) and item.title == "top item",
@@ -874,7 +895,10 @@ def _test_closed(check: Check, directory: Path) -> None:
         (tasks, (4,), 1), (tasks, (2,), 2), (issues, (1,), 3),
         (tasks, (1,), 4),
     ):
-        collection.set_state(name, "Closed")
+        # The issue is Rejected, which counts as finished too.
+        collection.set_state(
+            name, "Rejected" if collection is issues else "Closed"
+        )
         metadata: dict[str, object] = read_item(
             collection.directories[name]
         )
@@ -895,9 +919,9 @@ def _test_closed(check: Check, directory: Path) -> None:
         )
         check(
             read_file(directory / "TASKS" / "Closed.md")
-            == "# Older Closed Items\n\n"
+            == "# Older Closed and Rejected Items\n\n"
             "<!-- Written by tracker; do not edit. -->\n\n"
-            "These closed items are only listed by tag and title; "
+            "These items are only listed by tag and title; "
             "`tracker TAG\nshow` shows the rest.\n\n- `T.d` Delta\n",
             "Closed.md lists the older closed items",
         )
@@ -1220,7 +1244,7 @@ def _test_commands(check: Check, directory: Path) -> None:
     os.chdir(directory)
     try:
         for answer, arguments, code, text in (
-            ("", (), 0, "Usage"),
+            ("", (), 0, "0 collections found\n`tracker NAME create` creates"),
             ("", ("--help",), 0, "Usage"),
             ("", ("-h",), 0, "Usage"),
             ("", ("--bogus",), 1, "Unknown option"),
@@ -1238,7 +1262,7 @@ def _test_commands(check: Check, directory: Path) -> None:
             ("", ("t", "h"), 0, "Usage"),
             ("", ("t", "bogus"), 1, "Unknown command"),
             ("", ("t", "c", "1"), 1, "close, create"),
-            ("", ("t", "re", "1"), 1, "reference, rename"),
+            ("", ("t", "re", "1"), 1, "reference, reject, rename"),
             ("", ("t", "l", "1"), 0, ""),
             ("", ("t", "create", "1", "An", "item"), 0, ""),
             ("", ("T", "cr", "1.1", "Child"), 0, ""),
@@ -1252,12 +1276,14 @@ def _test_commands(check: Check, directory: Path) -> None:
             ("", ("t", "li", "--long", "1.1"), 0, "Child"),
             ("", ("t", "ls", "-l", "1", "2"), 1, "Usage"),
             ("", ("t", "cl", "1.1"), 0, "Closed"),
-            ("", ("t", "ls"), 0, "An item\n(1 Closed item not shown"),
+            ("", ("t", "ls"), 0, "An item\n(1 Closed or Rejected item not"),
             ("", ("t", "ls", "1.1"), 0, "Closed     T.c  Child\n"),
             ("", ("t", "ls", "-a"), 0, "Closed     T.c  Child\n"),
             ("", ("t", "cl", "1"), 0, "Closed"),
             ("", ("t", "ls", "--all", "-l"), 0, "  An item\n1.1"),
-            ("", ("t", "ls"), 0, "(2 Closed items not shown;"),
+            ("", ("t", "rej", "1"), 0, "Rejected"),
+            ("", ("t", "ls"), 0, "(2 Closed or Rejected items not shown;"),
+            ("", ("t", "sh", "1"), 0, "Rejected\n"),
             ("", ("t", "o", "-r", "1"), 0, "Open"),
             ("", ("t", "cl", "1"), 0, "Closed"),
             ("", ("t", "s", "1"), 1, "show, suspend"),
@@ -1314,6 +1340,22 @@ def _test_commands(check: Check, directory: Path) -> None:
             ("", ("t", "delete", "-r", "1"), 1, "Nothing deleted"),
             ("", ("i", "create", "1", "Crash"), 0, ""),
             ("", ("I", "OPEN", "1"), 0, "Open"),
+            (
+                "",
+                (),
+                0,
+                "2 collections found in '",
+            ),
+            (
+                "",
+                (),
+                0,
+                (
+                    ":\n1 - Issues  I.  1 item: 1 Open\n"
+                    "2 - TASKS   T.  2 items: 1 Open, 1 Reference\n"
+                    "Type: `tracker -h` for more help.\n"
+                ),
+            ),
             ("", ("i", "ls"), 0, "I.c  Crash"),
             ("", ("I.c", "show"), 0, "Tag:       I.c\nTitle:     Crash"),
             ("", ("i.C", "sh"), 0, "  Open\n\n# 1 Crash\n"),
@@ -1382,6 +1424,10 @@ def _test_commands(check: Check, directory: Path) -> None:
             run("Notes", "create")[0] == 0
             and (directory / "Notes" / COLLECTION_FILE).is_file(),
             "create a collection next to the others",
+        )
+        check(
+            "\n2 - Notes   N.  no items\n" in run()[1],
+            "an empty collection is listed with no items",
         )
         answers[:] = ["y"]
         code, text = run("tools", "create")
@@ -1511,7 +1557,14 @@ def _test_errors(check: Check, directory: Path) -> None:
         read_only.chmod(0o700)
     write_file(read_only / COLLECTION_FILE, "{}\n")
     (read_only / COLLECTION_FILE).chmod(0o400)
-    collection: Items = Items(read_only)
+    errors = io.StringIO()
+    with contextlib.redirect_stderr(errors):
+        collection: Items = Items(read_only)
+    check(
+        "Unable to write" in errors.getvalue()
+        and "version" not in collection.settings,
+        "the version can not be added",
+    )
     check(
         "Unable to write" in collection.set_feature("priority", True),
         "set_feature write failure",

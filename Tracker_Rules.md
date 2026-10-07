@@ -4,8 +4,9 @@
 
 The `tracker` program is used to create and manage items in collections
 such as `TASKS/` and `ISSUES/` (see `README.md`.)  `tracker` with no
-arguments lists all of the commands.  Every command starts with the
-collection, which (like the command) may be any unique prefix in any case.
+arguments lists the collections, and `tracker -h` lists all of the
+commands.  Every command starts with the collection, which (like the
+command) may be any unique prefix in any case.
 The `create` command (e.g. `tracker TASKS create 1.2.3 New Task`, or
 `tracker t cr 1.2.3 New Task`) creates an item directory (e.g.
 `TASKS/1.2.3_New_Task/`) containing:
@@ -67,8 +68,10 @@ item exists and what it settled.  `tracker T.fbm show` and the
 item's files give the rest when needed.
 
 New items start out Pending.  The states are Pending, Open, Reference,
-Suspended and Closed.  A Reference item is not being worked on, but its
-`Context.md` is still loaded, so its context stays available.
+Suspended, Closed and Rejected.  A Reference item is not being worked on,
+but its `Context.md` is still loaded, so its context stays available.  A
+Rejected item was decided against (`tracker i reject NUMBER`); it is
+treated like a Closed one, and its `Summary.md` says why.
 
 Every time `tracker` is successfully run, it overwrites `TASKS/Startup.md`
 with `@` imports of the `Details.md` of every item and the `Context.md` of

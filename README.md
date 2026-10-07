@@ -38,7 +38,8 @@ with the following information:
   Priority is enabled per collection (`tracker i enable priority`); then
   `ls` shows it and lists Items by priority first.
 * State:
-  The state of the item: Pending, Open, Reference, Suspended or Closed.
+  The state of the item: Pending, Open, Reference, Suspended, Closed or
+  Rejected (decided against; otherwise treated like Closed).
   New items start out Pending.  A Reference item is not being worked on,
   but its `Context.md` is still loaded like an Open item's.
 * `Details.md`:
@@ -93,5 +94,6 @@ heading of `Summary.md`) and reports what a person maintains (a missing
 heading, a title edited so that it no longer matches the directory name,
 two Items with the same tag), saying how to fix it.
 
-Run `tracker` with no arguments to list the commands.  `tracker t ls -l` also
-lists the created and updated times in the local time zone.
+Run `tracker` with no arguments to list the collections, one line each, and
+`tracker -h` to list the commands.  `tracker t ls -l` also lists the created
+and updated times in the local time zone.
