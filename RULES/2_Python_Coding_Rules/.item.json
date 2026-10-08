@@ -1,0 +1,15 @@
+{
+  "state": "InActive",
+  "created": "2026-10-08T00:06:41Z",
+  "updated": "2026-10-08T00:06:41Z",
+  "history": [
+    {
+      "state": "InActive",
+      "time": "2026-10-08T00:06:41Z"
+    }
+  ],
+  "tag": "pcr",
+  "source": "../claude_code_rules/Python_Coding_Rules.md",
+  "sha256": "e994be55b048ecef58767de84c130fdb0d50555dcb0fedc1da946ca8d272f0fb",
+  "refreshed": "2026-10-08T00:06:41Z"
+}

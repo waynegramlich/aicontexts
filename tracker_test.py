@@ -1,6 +1,7 @@
 """The tests of tracker, run by `tracker --test`."""
 
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -37,6 +38,7 @@ from tracker import (
     print_items,
     read_file,
     read_item,
+    sha256_of,
     tag_prefix,
     tag_references,
     unique_tag,
@@ -83,6 +85,10 @@ def test() -> int:
     # away from the collections made by the other tests.
     with tempfile.TemporaryDirectory() as temporary:
         _test_commands(check, Path(temporary) / "commands")
+    with tempfile.TemporaryDirectory() as temporary:
+        _test_types(check, Path(temporary))
+    with tempfile.TemporaryDirectory() as temporary:
+        _test_rules(check, Path(temporary))
     print(f"{len(checks)} checks, {len(failures)} failures")
     return 1 if failures else 0
 
@@ -1496,6 +1502,462 @@ def _test_commands(check: Check, directory: Path) -> None:
             directory.chmod(0o700)
     finally:
         os.chdir(original)
+
+
+def _runner(answers: list[str]) -> Callable[..., tuple[int, str]]:
+    """Return a function that runs a tracker command.
+
+    It returns the exit code and everything printed.  Each question is
+    answered with the next of `answers`, or EOF if there are none.
+    """
+
+    def ask(_: str) -> str:
+        if not answers:
+            raise EOFError
+        return answers.pop(0)
+
+    def run(*arguments: str) -> tuple[int, str]:
+        output: io.StringIO = io.StringIO()
+        with (
+            contextlib.redirect_stdout(output),
+            contextlib.redirect_stderr(output),
+        ):
+            code: int = Items.run_command(list(arguments), ask)
+        return code, output.getvalue()
+
+    return run
+
+
+def _test_types(check: Check, directory: Path) -> None:
+    """Test collection types, and a rules collection, from `directory`."""
+    answers: list[str] = []
+    run: Callable[..., tuple[int, str]] = _runner(answers)
+    original: Path = Path.cwd()
+    os.chdir(directory)
+    (directory / "sources").mkdir()
+    write_file(
+        directory / "sources" / "Version_Control_Rules.md", "# Use hg\n"
+    )
+    try:
+        for answer, arguments, code, text in (
+            ("y", ("TASKS", "create"), 0, "Created"),
+            ("y", ("RULES", "create"), 0, "Created"),
+            ("", ("r", "type"), 0, "RULES: items\n"),
+            ("", ("r", "type", "x"), 1, "TYPE is one of: items, rules"),
+            ("", ("r", "type", "r", "x"), 1, "Usage"),
+            ("", ("r", "type", "r"), 0, "RULES: rules\n"),
+            ("", ("r", "type", "rules"), 0, "RULES: rules\n"),
+            (
+                "",
+                ("r", "cr", "1", "sources/Version_Control_Rules.md"),
+                0,
+                "1  InActive   R.vcr  Version Control Rules\n",
+            ),
+            ("", ("r", "ls"), 0, "1  InActive   R.vcr  Version Control"),
+            ("", ("r", "act", "1"), 0, "1  Active     R.vcr"),
+            ("", ("R.vcr", "deact"), 0, "1  InActive   R.vcr"),
+            ("", ("r", "a", "R.vcr"), 0, "Active"),
+            ("", ("r", "open", "1"), 1, "commands are: create, rename"),
+            ("", ("r", "open", "1"), 1, "activate, deactivate"),
+            ("", ("r", "d", "1"), 1, "deactivate, delete, disable"),
+            ("", ("t", "act", "1"), 1, "Unknown command 'act'"),
+            ("", ("t", "d", "1"), 1, "delete, disable\n"),
+            ("", ("r", "type", "items"), 1, "only be changed while it has"),
+            ("", ("r", "type"), 0, "RULES: rules\n"),
+            (
+                "",
+                ("r", "sh", "1"),
+                0,
+                "State:     Active\nSource:    sources/Version_Control_Rules",
+            ),
+            ("", ("t", "cr", "1", "A task"), 0, ""),
+            ("", ("t", "o", "1"), 0, "Open"),
+            ("", ("t", "type", "i"), 0, "TASKS: items\n"),
+            ("", (), 0, "RULES  R.  1 item: 1 Active\n"),
+            ("y", ("r", "ren", "1", "to", "Version Rules"), 0, "R.vr"),
+        ):
+            answers[:] = [answer] if answer else []
+            result: tuple[int, str] = run(*arguments)
+            check(
+                result[0] == code and text in result[1],
+                f"type command {' '.join(arguments)!r}",
+            )
+        rule: Path = directory / "RULES" / "1_Version_Rules"
+        check(
+            sorted(path.name for path in rule.iterdir())
+            == [ITEM_FILE, "Details.md", "Version_Control_Rules.md"],
+            "a rule has only a Details.md and its copy",
+        )
+        check(
+            json.loads(read_file(directory / "RULES" / COLLECTION_FILE))[
+                "type"
+            ]
+            == "rules",
+            "the type is kept in .tracker.json",
+        )
+        check(
+            read_file(directory / "TASKS" / "Startup.md")
+            == "@1_A_task/Details.md\n@1_A_task/Context.md\n",
+            "rules are not in Startup.md",
+        )
+        metadata: dict[str, object] = read_item(rule)
+        write_item(rule, {**metadata, "state": "Open"})
+        code, text = run("r", "ls")
+        check(
+            code == 0
+            and "its state 'Open' is not one of Active, InActive" in text
+            and "R.vr" not in text,
+            "skip a rule in a state of another type",
+        )
+        write_item(rule, metadata)
+        settings_path: Path = directory / "RULES" / COLLECTION_FILE
+        settings: str = read_file(settings_path)
+        for text, problem in (
+            ('{"version": "0.1", "type": "bogus"}', "the unknown type"),
+            ("[]", "not a JSON object"),
+            ("{", "Unable to read"),
+        ):
+            write_file(settings_path, text)
+            code, output = run("r", "ls")
+            check(
+                code == 1 and problem in output,
+                f"a collection with the settings {text!r}",
+            )
+        write_file(settings_path, settings)
+        if os.geteuid() == 0:
+            # Permissions are not enforced for root.
+            return  # pragma: no cover
+        settings_path.chmod(0o000)
+        try:
+            code, text = run("r", "ls")
+            check(
+                code == 1 and "Unable to read" in text,
+                "a collection whose settings can not be read",
+            )
+        finally:
+            settings_path.chmod(0o600)
+        empty: Path = directory / "Empty" / COLLECTION_FILE
+        empty.parent.mkdir()
+        write_file(empty, f'{{"version": "{FORMAT_VERSION}"}}\n')
+        empty.chmod(0o400)
+        try:
+            code, text = run("e", "type", "rules")
+            check(
+                code == 1 and "Unable to write" in text,
+                "a type that can not be saved",
+            )
+        finally:
+            empty.chmod(0o600)
+    finally:
+        os.chdir(original)
+
+
+def _test_rules(check: Check, directory: Path) -> None:
+    """Test the rules of a rules collection, with their sources.
+
+    The collections are in `directory/project` and the sources in
+    `directory/shared`.
+    """
+    answers: list[str] = []
+    run: Callable[..., tuple[int, str]] = _runner(answers)
+    project: Path = directory / "project"
+    shared: Path = directory / "shared"
+    project.mkdir()
+    shared.mkdir()
+    (directory / "linked").symlink_to("shared")
+    write_file(shared / "Alpha_Rule.md", "# A\n\nAlways do A.\n")
+    write_file(shared / "Beta_Rule.md", "# B\n")
+    write_file(shared / "Details.md", "# Not a rule\n")
+    for name in ("other.md", "last.md", "code.md", "fenced.md"):
+        write_file(shared / name, "# Imported\n")
+    (shared / "Link_Rule.md").symlink_to("Alpha_Rule.md")
+    original: Path = Path.cwd()
+    os.chdir(project)
+    rules: Path = project / "RULES"
+    active: Path = rules / "Active_Rules.md"
+    try:
+        for answer, arguments, code, text in (
+            ("y", ("TASKS", "create"), 0, "Created"),
+            ("y", ("RULES", "create"), 0, "Created"),
+            ("", ("r", "type", "rules"), 0, "RULES: rules"),
+            ("", ("r", "cr", "1"), 1, "NUMBER FILE..."),
+            ("", ("t", "cr", "1"), 1, "NUMBER TITLE..."),
+            ("", ("r", "cr", "1", "../shared/*.zz"), 1, "No files match"),
+            ("", ("r", "cr", "1", "../shared/No.md"), 1, "is not a file"),
+            ("", ("r", "cr", "2", "../shared/Beta_Rule.md"), 1, "leave a gap"),
+            (
+                "",
+                ("r", "cr", "1", "../shared/[AB]*_Rule.md"),
+                0,
+                (
+                    "1  InActive   R.ar  Alpha Rule\n"
+                    "2  InActive   R.br  Beta Rule\n"
+                ),
+            ),
+            (
+                "",
+                ("r", "cr", "before", "1", "../linked/Link_Rule.md"),
+                0,
+                "1  InActive   R.lr  Link Rule\n",
+            ),
+            ("", ("r", "cr", "4", "../shared/Details.md"), 1, "can not be"),
+            ("", ("r", "del", "4"), 0, "Deleted"),
+        ):
+            answers[:] = [answer] if answer else []
+            result: tuple[int, str] = run(*arguments)
+            check(
+                result[0] == code and text in result[1],
+                f"rules command {' '.join(arguments)!r}",
+            )
+        rule: Path = rules / "2_Alpha_Rule"
+        copy: Path = rule / "Alpha_Rule.md"
+        metadata: dict[str, object] = read_item(rule)
+        check(
+            metadata["source"] == "../shared/Alpha_Rule.md"
+            and metadata["sha256"]
+            == hashlib.sha256(b"# A\n\nAlways do A.\n").hexdigest()
+            and read_file(copy) == "# A\n\nAlways do A.\n"
+            and copy.stat().st_mode & 0o777 == 0o444,
+            "a rule's source is copied, read-only",
+        )
+        check(
+            read_item(rules / "1_Link_Rule")["source"]
+            == "../shared/Link_Rule.md"
+            and read_file(rules / "1_Link_Rule" / "Link_Rule.md")
+            == read_file(copy),
+            "a source's directories are resolved, but not its file",
+        )
+        check(read_file(active) == "", "no Active rules")
+        check(
+            run("r", "act", "2")[0] == 0
+            and read_file(active) == "@2_Alpha_Rule/Alpha_Rule.md\n",
+            "Active_Rules.md imports the Active rules",
+        )
+        check(
+            run("r", "act", "-r", "1")[0] == 0
+            and read_file(active)
+            == "@1_Link_Rule/Link_Rule.md\n@2_Alpha_Rule/Alpha_Rule.md\n",
+            "Active_Rules.md is in number order",
+        )
+        check(
+            "@" not in read_file(project / "TASKS" / "Startup.md"),
+            "rules are not in Startup.md",
+        )
+        code, text = run("r", "sh", "R.ar")
+        check(
+            code == 0
+            and "Source:    ../shared/Alpha_Rule.md\nSHA-256:   " in text
+            and "Refreshed: 2" in text,
+            "show a rule's source",
+        )
+        write_file(shared / "Alpha_Rule.md", "# A\n\nAlways do A twice.\n")
+        code, text = run("r", "ls")
+        check(
+            "Refreshed R.ar from '../shared/Alpha_Rule.md'" in text
+            and "Refreshed R.lr from '../shared/Link_Rule.md'" in text
+            and "twice" in read_file(copy),
+            "a changed source is copied again",
+        )
+        code, text = run("r", "ls")
+        check("Refreshed" not in text, "an unchanged source is not copied")
+        check(
+            run("r", "refresh", "2") == (0, "R.ar is up to date\n"),
+            "refresh an unchanged rule",
+        )
+        copy.chmod(0o644)
+        write_file(copy, "# A\n\nEdited.\n")
+        write_file(shared / "Alpha_Rule.md", "# A\n\nAlways do A thrice.\n")
+        code, text = run("r", "ls")
+        check(
+            "R.ar: its copy '" in text
+            and "was edited in place; `tracker R.ar refresh`" in text
+            and read_file(copy) == "# A\n\nEdited.\n",
+            "an edited copy is left alone",
+        )
+        check(
+            run("r", "refresh", "R.ar")[1].endswith("Not refreshed\n"),
+            "refresh an edited copy, with no answer",
+        )
+        answers[:] = ["n"]
+        code, text = run("r", "refresh", "R.ar")
+        check(
+            code == 1
+            and text.endswith("Not refreshed\n")
+            and read_file(copy) == "# A\n\nEdited.\n",
+            "refresh an edited copy, answering no",
+        )
+        answers[:] = ["y"]
+        code, text = run("r", "refresh", "R.ar")
+        check(
+            code == 0
+            and text.endswith(
+                "Refreshed R.ar from '../shared/Alpha_Rule.md'\n"
+            )
+            and "thrice" in read_file(copy),
+            "refresh an edited copy, answering yes",
+        )
+        metadata = read_item(rule)
+        del metadata["sha256"]
+        write_item(rule, metadata)
+        code, text = run("r", "ls")
+        check(
+            "Refreshed" not in text
+            and "edited" not in text
+            and read_item(rule)["sha256"] == sha256_of(copy),
+            "record the hash of a copy that matches its source",
+        )
+        for answer, arguments, code, text in (
+            ("", ("r", "refresh"), 1, "Usage"),
+            ("", ("r", "refresh", "x"), 1, "Invalid"),
+            ("", ("r", "refresh", "9"), 1, "does not exist"),
+            ("", ("r", "source", "1"), 1, "Usage"),
+            ("", ("r", "source", "x", "y"), 1, "Invalid"),
+            ("", ("r", "source", "9", "../shared/Beta_Rule.md"), 1, "exist"),
+            ("", ("r", "source", "1", "../shared/No.md"), 1, "not a file"),
+            ("", ("r", "source", "1", "../shared/Details.md"), 1, "can not"),
+            (
+                "",
+                ("R.lr", "source", "../shared/Beta_Rule.md"),
+                0,
+                "1  Active     R.lr  Link Rule\n",
+            ),
+            ("", ("t", "source", "1", "x"), 1, "Unknown command"),
+        ):
+            answers[:] = [answer] if answer else []
+            result = run(*arguments)
+            check(
+                result[0] == code and text in result[1],
+                f"rules command {' '.join(arguments)!r}",
+            )
+        check(
+            sorted(path.name for path in (rules / "1_Link_Rule").iterdir())
+            == [ITEM_FILE, "Beta_Rule.md", "Details.md"]
+            and read_file(active)
+            == "@1_Link_Rule/Beta_Rule.md\n@2_Alpha_Rule/Alpha_Rule.md\n",
+            "a new source replaces the old copy",
+        )
+        write_file(
+            shared / "Beta_Rule.md",
+            "# B\n\nSee @other.md and `@code.md`, mail a@b.c.\n"
+            "```\n@fenced.md\n```\n@last.md @dataclass\n",
+        )
+        write_file(project / "CLAUDE.md", "@../shared/Alpha_Rule.md\n@No.md\n")
+        code, text = run("r", "ls")
+        check(
+            "R.lr: its copy imports @other.md (line 3); a rule must stand"
+            in text
+            and "R.lr: its copy imports @last.md (line 7)" in text
+            and "code.md" not in text
+            and "b.c" not in text
+            and "fenced" not in text
+            and "dataclass" not in text,
+            "report @ imports in a copy",
+        )
+        check(
+            "R.ar is the same as '../shared/Alpha_Rule.md', which CLAUDE.md "
+            "also imports" in text,
+            "report a rule that CLAUDE.md also imports",
+        )
+        (shared / "Beta_Rule.md").unlink()
+        code, text = run("r", "ls")
+        check(
+            "R.lr: its source '../shared/Beta_Rule.md' is missing; its last "
+            "copy is kept" in text,
+            "a missing source keeps its copy",
+        )
+        (rules / "1_Link_Rule" / "Beta_Rule.md").unlink()
+        code, text = run("r", "ls")
+        check(
+            "R.lr: its source '../shared/Beta_Rule.md' is missing\n" in text
+            and "R.lr is Active but has no copy of its source" in text
+            and read_file(active) == "@2_Alpha_Rule/Alpha_Rule.md\n",
+            "an Active rule without a copy",
+        )
+        check(
+            run("r", "refresh", "1")[0] == 1, "refresh a missing source"
+        )
+        check(
+            "has no copy of a source to make Active"
+            in run("r", "act", "1")[1]
+            and run("r", "deact", "1")[0] == 0,
+            "only a rule with a copy can be made Active",
+        )
+        metadata = read_item(rules / "1_Link_Rule")
+        for key in ("source", "sha256", "refreshed"):
+            del metadata[key]
+        write_item(rules / "1_Link_Rule", metadata)
+        code, text = run("r", "ls")
+        check(
+            "R.lr has no source; `tracker R.lr source PATH` sets one" in text,
+            "report a rule without a source",
+        )
+        check(
+            "has no source" in run("r", "refresh", "1")[1]
+            and "has no copy" in run("r", "act", "1")[1],
+            "refresh or activate a rule without a source",
+        )
+        code, text = run("r", "sh", "1")
+        check(
+            "Source:    -\nSHA-256:   -\nRefreshed: -\n" in text,
+            "show a rule without a source",
+        )
+        _test_rule_failures(check, run, rules)
+    finally:
+        os.chdir(original)
+
+
+def _test_rule_failures(
+    check: Check, run: Callable[..., tuple[int, str]], rules: Path
+) -> None:
+    """Test the rules in `rules` when files can not be read or written.
+
+    `run` runs a command in the project; rule 2 (`R.ar`) has a source.
+    """
+    active: Path = rules / "Active_Rules.md"
+    active.unlink()
+    active.mkdir()
+    code, text = run("r", "ls")
+    check(
+        code == 1 and "Unable to write" in text,
+        "Active_Rules.md can not be written",
+    )
+    active.rmdir()
+    if os.geteuid() == 0:
+        # Permissions are not enforced for root.
+        return  # pragma: no cover
+    rule: Path = rules / "2_Alpha_Rule"
+    copy: Path = rule / "Alpha_Rule.md"
+    copy.chmod(0o000)
+    try:
+        code, text = run("r", "ls")
+        check(
+            "Unable to refresh R.ar" in text
+            and "Unable to check R.ar" in text,
+            "a copy that can not be read",
+        )
+    finally:
+        copy.chmod(0o444)
+    (rule / ".copy.tmp" / "x").mkdir(parents=True)
+    code, text = run("r", "source", "2", "../shared/Alpha_Rule.md")
+    check(
+        code == 1 and "Unable to refresh R.ar" in text,
+        "a copy that can not be written",
+    )
+    shutil.rmtree(rule / ".copy.tmp")
+    (rule / ITEM_FILE).chmod(0o400)
+    try:
+        code, text = run("r", "source", "2", "../shared/Alpha_Rule.md")
+        check(
+            code == 1 and "Unable to set the source of R.ar" in text,
+            "a source that can not be recorded",
+        )
+    finally:
+        (rule / ITEM_FILE).chmod(0o600)
+    check(
+        run("r", "source", "2", "../shared/Alpha_Rule.md")[0] == 0
+        and copy.is_file(),
+        "set a source again after failures",
+    )
 
 
 def _test_errors(check: Check, directory: Path) -> None:

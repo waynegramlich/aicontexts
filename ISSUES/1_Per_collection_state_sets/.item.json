@@ -1,0 +1,16 @@
+{
+  "state": "Closed",
+  "created": "2026-10-07T22:58:03Z",
+  "updated": "2026-10-08T00:29:48Z",
+  "history": [
+    {
+      "state": "Pending",
+      "time": "2026-10-07T22:58:03Z"
+    },
+    {
+      "state": "Closed",
+      "time": "2026-10-08T00:29:48Z"
+    }
+  ],
+  "tag": "pss"
+}

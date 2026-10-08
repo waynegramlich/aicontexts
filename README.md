@@ -4,7 +4,11 @@ The `tracker` program manages directories of Items.  It can be used to manage
 Issues (i.e. bugs), Tasks (i.e. chunks of work), etc.  Each class of Item is
 an independent collection that lives in its own directory (e.g. `ISSUES/`,
 `TASKS/`.)  A collection directory is marked by a hidden `.tracker.json`
-file, and is created (after asking) with `tracker NAME create`.
+file, and is created (after asking) with `tracker NAME create`.  Each
+collection has a type, kept in its `.tracker.json`: an "items" collection
+(the default, like `TASKS/` and `ISSUES/`) or a "rules" collection (see
+"Rules Collections" below).  `tracker r type rules` sets the type, but
+only while the collection is empty.
 
 Every command names its collection first: `tracker COLLECTION COMMAND ...`.
 Collection and command names can be shortened to any unique prefix, in any
@@ -41,7 +45,8 @@ with the following information:
   The state of the item: Pending, Open, Reference, Suspended, Closed or
   Rejected (decided against; otherwise treated like Closed).
   New items start out Pending.  A Reference item is not being worked on,
-  but its `Context.md` is still loaded like an Open item's.
+  but its `Context.md` is still loaded like an Open item's.  (A rule's
+  state is Active or InActive instead.)
 * `Details.md`:
   A file edited by a human that textually describes the item.  Its first
   line is a heading with the Number and Title (e.g. `# 1.2.3 Title`.)
@@ -54,7 +59,8 @@ with the following information:
 * `.item.json`:
   A hidden file managed by `tracker` that holds the State, Tag, Priority,
   the created and updated times (in UTC), and a history of every State
-  change.
+  change; for a rule, also its source, the SHA-256 of its copy and when
+  the copy was refreshed.
 
 Every time `tracker` runs, it rewrites `TASKS/Startup.md`.  It contains only
 Claude Code `@` imports: one for the `Details.md` of every Item that is not
@@ -64,9 +70,9 @@ every collection (e.g. `@../ISSUES/1_Crash/Details.md`).  Then come the
 `Details.md` if the summary is still empty), and finally, if there are older
 closed Items, `TASKS/Closed.md`, which `tracker` writes to list them by tag
 and title only.  (The test suite changes the 50 with
-`TRACKER_TEST_CLOSED_SUMMARIES`.)  Adding
-`@TASKS/Startup.md` to `CLAUDE.md` loads them at the start of each AI
-session.
+`TRACKER_TEST_CLOSED_SUMMARIES`.)  Adding `@TASKS/Startup.md` to
+`CLAUDE.md` loads them at the start of each AI session.  Rules are not in
+`TASKS/Startup.md` (see "Rules Collections".)
 
 There is no undo; use a version control system.  Before a move or rename,
 if the collection has had no move or rename for over an hour (the time is
@@ -97,3 +103,48 @@ two Items with the same tag), saying how to fix it.
 Run `tracker` with no arguments to list the collections, one line each, and
 `tracker -h` to list the commands.  `tracker t ls -l` also lists the created
 and updated times in the local time zone.
+
+## Rules Collections
+
+A rules collection (e.g. `RULES/`) holds rules that Claude Code should
+load at the start of every session, such as version control or coding
+rules shared by several projects.  The rule files can live anywhere in
+the file system, but Claude Code will not import a file outside the
+project (even through a symbolic link) without approval, so `tracker`
+copies each rule into the project:
+
+    tracker RULES create
+    tracker r type rules
+    tracker r create 1 ../claude_code_rules/*.md
+    tracker r activate R.vcr
+
+`create PLACE FILE...` makes one rule from each file (or glob pattern), at
+PLACE and then after it, titled from the file name
+(`Version_Control_Rules.md` is "Version Control Rules").  Each rule
+directory holds a `Details.md` (why the project uses the rule; it is not
+loaded), the `.item.json` and a read-only copy of the source file with the
+same name (e.g.
+`RULES/1_Version_Control_Rules/Version_Control_Rules.md`).  The source is
+kept relative to the directory that holds the collections, with its
+directories resolved to real ones; `tracker r source R.vcr FILE` changes
+it.
+
+A new rule is InActive; `activate` (which needs a copy) and `deactivate`
+change that.  Every time `tracker` runs, it rewrites `RULES/Active_Rules.md`
+with an `@` import of the copy of every Active rule, in number order, so
+adding `@RULES/Active_Rules.md` to `CLAUDE.md` loads them.
+
+Every run also refreshes the copies.  A copy that matches its source is
+left alone; a changed source is copied again (to a temporary file that
+then replaces the copy) and its SHA-256 is recorded.  A copy whose SHA-256
+is no longer the recorded one was edited in place: it is reported and
+kept, and `tracker r refresh R.vcr` replaces it after asking.  A missing
+source is reported, and the last copy is kept.  The copies are small and
+are meant to be kept in version control, so a change to a shared rule
+shows up as a diff in each project that uses it.
+
+A rule must stand alone, so every run also reports a rule with no source,
+an Active rule with no copy, an `@` import of a file in a copy (outside
+code spans and blocks, relative to the source), and a copy that is the
+same as a file that `CLAUDE.md` imports directly (the same rule loaded
+twice).

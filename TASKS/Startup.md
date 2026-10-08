@@ -1,7 +1,7 @@
-@7_Explore_Having_a_Rules_Collection/Details.md
-@7_Explore_Having_a_Rules_Collection/Context.md
 @8_Review_README.md_together/Details.md
 @9_Explore_moving_items_between_collections/Details.md
+@../ISSUES/1_Per_collection_state_sets/Summary.md
+@7_Explore_Having_a_Rules_Collection/Summary.md
 @10_Hide_closed_items_and_check_on_startup/Summary.md
 @2_Cleanup/Summary.md
 @3_Support_Multiple_Item_Collections/Summary.md

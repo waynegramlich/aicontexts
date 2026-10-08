@@ -2,6 +2,8 @@
 """A general purpose command line tool for tracking items."""
 
 import contextlib
+import glob
+import hashlib
 import json
 import os
 import re
@@ -32,6 +34,8 @@ current directory) and is named exactly as typed.
 
 Commands:
   create PLACE TITLE...   Create an item at PLACE (see below)
+  create PLACE FILE...    In a rules collection, create a rule from each
+                          FILE (or glob pattern), at PLACE and after
   move NUMBER PLACE       Move an item, with its children, to PLACE.
                           NUMBER may be a range of siblings, like 1.2.5-6
   rename NUMBER to TITLE...
@@ -49,10 +53,17 @@ Commands:
   suspend [-r] NUMBER     Set the item state to Suspended
   close [-r] NUMBER       Set the item state to Closed
   reject [-r] NUMBER      Set the item state to Rejected
+  activate [-r] NUMBER    Set the rule state to Active (rules collections)
+  deactivate [-r] NUMBER  Set the rule state to InActive (rules collections)
+  source NUMBER FILE      Make FILE the source of a rule, and copy it
+  refresh NUMBER          Copy a rule's source over its copy, asking first
+                          if the copy was edited in place
   priority NUMBER LEVEL   Set the item priority: 0 (catastrophic), 1 (high),
                           2 (medium), 3 (low), or - for none
   enable FEATURE          Enable a collection feature (only: priority)
   disable FEATURE         Disable a collection feature
+  type [TYPE]             Print the collection type, or set it to TYPE
+                          (items or rules) while the collection is empty
   help                    Print this help message
 
 Options:
@@ -73,15 +84,30 @@ one in the collection was more than an hour ago, tracker recommends taking
 a version control snapshot (e.g. `git commit`) first, and asks whether to
 continue.
 
-Item states are: Pending, Open, Reference, Suspended, Closed, Rejected
-New items are created Pending.  Open items are being worked on.  Reference
-items are not, but like Open items their Context.md is in Startup.md.
-Closed items are done; Rejected items were decided against, and are
-otherwise treated like Closed ones.  Each item also has a Summary.md,
-written before it is closed or rejected.  For the 50 most recently closed
-or rejected items, Startup.md has their Summary.md (or Details.md if the
-summary is empty); older ones are listed by tag and title in a generated
-TASKS/Closed.md.
+Each collection has a type, kept in its `.tracker.json`, which decides its
+states, the files of its items and what Startup.md imports.  A new
+collection is an "items" collection.
+
+The states of an "items" collection are: Pending, Open, Reference,
+Suspended, Closed, Rejected.  New items are created Pending.  Open items
+are being worked on.  Reference items are not, but like Open items their
+Context.md is in Startup.md.  Closed items are done; Rejected items were
+decided against, and are otherwise treated like Closed ones.  Each item
+also has a Summary.md, written before it is closed or rejected.  For the
+50 most recently closed or rejected items, Startup.md has their
+Summary.md (or Details.md if the summary is empty); older ones are listed
+by tag and title in a generated TASKS/Closed.md.
+
+The states of a "rules" collection are Active and InActive (new rules are
+InActive), set with `activate` and `deactivate`.  A rule has a Details.md
+but no Context.md or Summary.md, and rules are not in Startup.md.  Each
+rule has a source file, kept relative to the directory that holds the
+collections, and a read-only copy of it in the rule's directory.  Every
+run copies a changed source again, unless the copy was edited in place,
+and writes RULES/Active_Rules.md, which imports the copies of the Active
+rules; add `@RULES/Active_Rules.md` to CLAUDE.md.  A rule must stand
+alone: an `@` import of a file in a copy is reported, as is a copy that
+CLAUDE.md also imports.
 
 Each item has a tag: the capitalized first letter of its collection and a
 period, then the first letter of each word of its title in lower case,
@@ -104,6 +130,115 @@ FINISHED_STATES: tuple[str, ...] = ("Closed", "Rejected")
 
 # The states whose `Context.md` is imported by `Startup.md`.
 CONTEXT_STATES: tuple[str, ...] = ("Open", "Reference")
+
+# The states of the items in a rules collection.
+RULE_STATES: tuple[str, ...] = ("Active", "InActive")
+
+
+@dataclass(frozen=True)
+class CollectionType:
+    """How the items of one type of collection behave.
+
+    `states` are the item states, `new_state` the state of a new item,
+    `finished_states` the ones that `ls` leaves out and `Startup.md` only
+    summarizes, and `context_states` the ones whose `Context.md` is in
+    `Startup.md`.  `state_commands` gives the state that each state command
+    sets, and `commands` are its other commands.  `files` are the Markdown
+    files of each item, and `in_startup` says whether `Startup.md` imports
+    them at all.  If `has_sources`, each item is a copy of a source file
+    (see `Items.check_rules()`).
+    """
+
+    states: tuple[str, ...]
+    new_state: str
+    finished_states: tuple[str, ...]
+    context_states: tuple[str, ...]
+    state_commands: dict[str, str]
+    commands: tuple[str, ...]
+    files: tuple[str, ...]
+    in_startup: bool
+    has_sources: bool
+
+
+# The types of collection, by the name kept in `.tracker.json`.  A
+# collection without a type is an "items" collection.
+TYPES: dict[str, CollectionType] = {
+    "items": CollectionType(
+        states=STATES,
+        new_state="Pending",
+        finished_states=FINISHED_STATES,
+        context_states=CONTEXT_STATES,
+        state_commands={
+            "pending": "Pending",
+            "open": "Open",
+            "reference": "Reference",
+            "suspend": "Suspended",
+            "close": "Closed",
+            "reject": "Rejected",
+        },
+        commands=(),
+        files=("Details.md", "Context.md", "Summary.md"),
+        in_startup=True,
+        has_sources=False,
+    ),
+    "rules": CollectionType(
+        states=RULE_STATES,
+        new_state="InActive",
+        finished_states=(),
+        context_states=(),
+        state_commands={"activate": "Active", "deactivate": "InActive"},
+        commands=("source", "refresh"),
+        files=("Details.md",),
+        in_startup=False,
+        has_sources=True,
+    ),
+}
+DEFAULT_TYPE: str = "items"
+
+# The states of every type of collection.
+ALL_STATES: tuple[str, ...] = tuple(
+    dict.fromkeys(
+        state
+        for collection_type in TYPES.values()
+        for state in collection_type.states
+    )
+)
+
+# The state commands of every type of collection.
+STATE_COMMANDS: dict[str, str] = {
+    command: state
+    for collection_type in TYPES.values()
+    for command, state in collection_type.state_commands.items()
+}
+
+# The other commands of every type of collection.
+TYPE_COMMANDS: tuple[str, ...] = tuple(
+    dict.fromkeys(
+        command
+        for collection_type in TYPES.values()
+        for command in collection_type.commands
+    )
+)
+
+# The file in each collection with sources (see `CollectionType`) that
+# imports the copies of its Active items.
+ACTIVE_RULES: str = "Active_Rules.md"
+
+# The hidden file that a new copy of a source is written to before it
+# replaces the old copy.
+COPY_TEMPORARY: str = ".copy.tmp"
+
+# The file names that a source file can not have, since its copy goes into
+# an item directory.
+RESERVED_NAMES: frozenset[str] = frozenset(
+    {"Details.md", "Context.md", "Summary.md"}
+)
+
+# An `@` import in Markdown: an `@` that starts a word, and the path after.
+IMPORT_PATTERN: re.Pattern[str] = re.compile(r"(?<!\S)@(\S+)")
+
+# The characters that make an argument a glob pattern.
+GLOB_CHARACTERS: str = "*?["
 
 # The hidden JSON file in each item directory that holds its metadata.
 ITEM_FILE: str = ".item.json"
@@ -129,8 +264,8 @@ INTERRUPT_VARIABLE: str = "TRACKER_TEST_RENUMBER_INTERRUPT"
 # COMMAND ...` can be used.
 TAG_COMMANDS: frozenset[str] = frozenset(
     {
-        "rename", "delete", "list", "show", "pending", "open", "reference",
-        "suspend", "close", "priority", "move",
+        "rename", "delete", "list", "show", "priority", "move",
+        *STATE_COMMANDS, *TYPE_COMMANDS,
     }
 )
 
@@ -170,24 +305,20 @@ FEATURES: tuple[str, ...] = ("priority",)
 # The words that are left out of a tag.
 TAG_IGNORED_WORDS: frozenset[str] = frozenset({"a", "an", "of", "the"})
 
-# The commands, and the command that each one runs.
+# The commands of every type of collection, and the command that each one
+# runs; each type adds its state commands (see `commands()`).
 COMMANDS: dict[str, str] = {
     "create": "create",
     "rename": "rename",
     "delete": "delete",
     "list": "list",
     "ls": "list",
-    "pending": "pending",
-    "open": "open",
-    "reference": "reference",
-    "suspend": "suspend",
-    "close": "close",
-    "reject": "reject",
     "priority": "priority",
     "move": "move",
     "show": "show",
     "enable": "enable",
     "disable": "disable",
+    "type": "type",
     "help": "help",
 }
 
@@ -339,6 +470,88 @@ def find_collections(start: Path) -> list[Path]:
         if found:
             return found
     return []
+
+
+def type_name(directory: Path) -> str:
+    """Return the type of the collection `directory`, from `.tracker.json`.
+
+    Returns `DEFAULT_TYPE` if the file can not be read or has no type; an
+    unknown type is returned as it is (`Items` reports it).
+    """
+    try:
+        settings: object = json.loads(read_file(directory / COLLECTION_FILE))
+    except (OSError, ValueError):
+        return DEFAULT_TYPE
+    if isinstance(settings, dict):
+        return str(settings.get("type", DEFAULT_TYPE))
+    return DEFAULT_TYPE
+
+
+def commands(name: str = "") -> dict[str, str]:
+    """Return the commands of collection type `name`, or of every type.
+
+    Each command is mapped to the command that it runs.
+    """
+    type_commands: Iterable[str] = (
+        [*TYPES[name].state_commands, *TYPES[name].commands]
+        if name in TYPES
+        else [*STATE_COMMANDS, *TYPE_COMMANDS]
+    )
+    return {**COMMANDS, **{command: command for command in type_commands}}
+
+
+def sha256_of(path: Path) -> str:
+    """Return the SHA-256 of the file at `path`, in hexadecimal.
+
+    Raises an `OSError` if the file can not be read.
+    """
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def markdown_imports(text: str) -> list[tuple[int, str]]:
+    """Return the line number and path of each `@` import in `text`.
+
+    Imports in fenced code blocks and in code spans are left out, since
+    Claude Code does not follow them.
+    """
+    found: list[tuple[int, str]] = []
+    fence: str = ""
+    for number, line in enumerate(text.splitlines(), 1):
+        stripped: str = line.lstrip()
+        if fence:
+            if stripped.startswith(fence):
+                fence = ""
+            continue
+        if stripped.startswith(("```", "~~~")):
+            fence = stripped[:3]
+            continue
+        found += [
+            (number, path)
+            for path in IMPORT_PATTERN.findall(re.sub(r"`[^`]*`", "", line))
+        ]
+    return found
+
+
+def expand_files(arguments: list[str]) -> list[Path] | str:
+    """Return the files named by `arguments`, expanding glob patterns.
+
+    An argument with any of `GLOB_CHARACTERS` is a pattern, which must
+    match at least one file; its matches are sorted.  Returns an error
+    string if an argument is not a file or a pattern matches nothing.
+    """
+    files: list[Path] = []
+    for argument in arguments:
+        if any(character in argument for character in GLOB_CHARACTERS):
+            matched: list[str] = sorted(glob.glob(argument))
+            if not matched:
+                return f"No files match '{argument}'"
+            files += [Path(path) for path in matched]
+        else:
+            files.append(Path(argument))
+    for path in files:
+        if not path.is_file():
+            return f"'{path}' is not a file"
+    return files
 
 
 def base_tag(title: str) -> str:
@@ -550,12 +763,14 @@ class Item:
     updated: str = ""
     tag: str = ""
     priority: int | None = None
+    source: str = ""
 
     def __post_init__(self) -> None:
         """Ensure that the name and state are valid.
 
         The name must be a non-empty tuple of positive integers and the
-        state must be one of `STATES`.  Raises a `ValueError` if not.
+        state must be one of `ALL_STATES` (`Items` checks that it is one of
+        its type's states).  Raises a `ValueError` if not.
         """
         if not (
             isinstance(self.name, tuple)
@@ -571,10 +786,10 @@ class Item:
                 f"Item name {self.name!r} is not a non-empty tuple of "
                 "positive integers"
             )
-        if self.state not in STATES:
+        if self.state not in ALL_STATES:
             raise ValueError(
                 f"Item state {self.state!r} is not one of "
-                f"{', '.join(STATES)}"
+                f"{', '.join(ALL_STATES)}"
             )
 
     @property
@@ -624,6 +839,12 @@ class Items:
                 if isinstance(settings, dict):
                     self.settings = settings
                     self.check_version()
+                    if self.collection_type_name not in TYPES:
+                        self.error = (
+                            f"'{collection_path}' has the unknown type "
+                            f"{self.collection_type_name!r}; the types "
+                            f"are: {', '.join(TYPES)}"
+                        )
                 else:
                     self.error = (
                         f"Unable to read '{collection_path}': "
@@ -660,6 +881,16 @@ class Items:
     def prefix(self) -> str:
         """Return the tag prefix of this collection, like "T."."""
         return tag_prefix(self.items_directory.name)
+
+    @property
+    def collection_type_name(self) -> str:
+        """Return the name of this collection's type, like "items"."""
+        return str(self.settings.get("type", DEFAULT_TYPE))
+
+    @property
+    def collection_type(self) -> CollectionType:
+        """Return this collection's type."""
+        return TYPES[self.collection_type_name]
 
     def resolve(self, word: str) -> tuple[int, ...] | str:
         """Return the name of the item that `word` gives.
@@ -699,6 +930,25 @@ class Items:
     def priority_enabled(self) -> bool:
         """Return whether priority is enabled for this collection."""
         return self.settings.get("priority") is True
+
+    def has_file(self, file_name: str) -> bool:
+        """Return whether the items of this collection have `file_name`."""
+        return file_name in self.collection_type.files
+
+    @property
+    def root(self) -> Path:
+        """Return the real path of the directory that holds the collections.
+
+        The sources of rules are kept relative to it.
+        """
+        return self.items_directory.parent.resolve()
+
+    def copy_path(self, item: Item) -> Path:
+        """Return where the copy of `item`'s source goes.
+
+        It is in the item directory, with the source file's name.
+        """
+        return self.directories[item.name] / Path(item.source).name
 
     def save_settings(self, settings: dict[str, object]) -> str:
         """Write `settings` to `.tracker.json` and keep them.
@@ -796,29 +1046,37 @@ class Items:
             prefix: str = f"# {number} "
             if heading.startswith(prefix):
                 title = heading[len(prefix):].strip()
-            priority: object = metadata.get("priority")
-            try:
-                self.items[name] = Item(
-                    name,
-                    title,
-                    state,
-                    str(metadata.get("created", "")),
-                    str(metadata.get("updated", "")),
-                    str(metadata.get("tag", "")),
-                    priority
-                    if isinstance(priority, int)
-                    and not isinstance(priority, bool)
-                    and priority in PRIORITIES
-                    else None,
+            states: tuple[str, ...] = self.collection_type.states
+            if state not in states:
+                print(
+                    f"Skipping '{item_directory}': its state {state!r} is "
+                    f"not one of {', '.join(states)}",
+                    file=sys.stderr,
                 )
-            except ValueError as error:
-                print(f"Skipping '{item_directory}': {error}", file=sys.stderr)
-            else:
-                self.directories[name] = item_directory
+                continue
+            priority: object = metadata.get("priority")
+            # The name and state are valid, so `Item` accepts them.
+            self.items[name] = Item(
+                name,
+                title,
+                state,
+                str(metadata.get("created", "")),
+                str(metadata.get("updated", "")),
+                str(metadata.get("tag", "")),
+                priority
+                if isinstance(priority, int)
+                and not isinstance(priority, bool)
+                and priority in PRIORITIES
+                else None,
+                str(metadata.get("source", "")),
+            )
+            self.directories[name] = item_directory
         self.add_missing_tags()
         self.add_missing_summaries()
         self.fix_gaps()
         self.check_items()
+        if self.collection_type.has_sources:
+            self.check_rules()
 
     def missing_names(self) -> list[tuple[int, ...]]:
         """Return the sorted names that are missing from the numbering.
@@ -1055,9 +1313,12 @@ class Items:
                 summary: str = summary_heading(
                     f"{self.prefix}{item.tag}", item.title
                 )
-                if (item_directory / "Summary.md").exists() and read_file(
-                    item_directory / "Summary.md"
-                ).partition("\n")[0] != summary:
+                summary_path: Path = item_directory / "Summary.md"
+                if (
+                    self.has_file("Summary.md")
+                    and summary_path.exists()
+                    and read_file(summary_path).partition("\n")[0] != summary
+                ):
                     write_summary_heading(item_directory, summary)
                     messages.append(f"Fixed the heading of {where}/Summary.md")
             except OSError as error:
@@ -1070,6 +1331,134 @@ class Items:
                 )
         for message in messages:
             print(message, file=sys.stderr)
+
+    def check_rules(self) -> None:
+        """Refresh and check the copies of the rules' sources.
+
+        Each rule with a source has its copy refreshed (see
+        `refresh_rule()`).  A rule without a source, an Active rule without
+        a copy, a copy with an `@` import of a file (relative to the
+        source; a rule must stand alone) and a copy that is the same as a
+        file that `CLAUDE.md` imports directly are reported.  Everything
+        goes to stderr.
+        """
+        messages: list[str] = []
+        imported: dict[str, str] = self.claude_imports()
+        for item in self.list_items():
+            tag: str = f"{self.prefix}{item.tag}"
+            if not item.source:
+                messages.append(
+                    f"{tag} has no source; `tracker {tag} source PATH` "
+                    "sets one"
+                )
+                continue
+            message: str = self.refresh_rule(item)
+            if message:
+                messages.append(message)
+            copy_path: Path = self.copy_path(item)
+            if not copy_path.is_file():
+                if item.state == "Active":
+                    messages.append(
+                        f"{tag} is Active but has no copy of its source "
+                        f"'{item.source}'"
+                    )
+                continue
+            try:
+                text: str = read_file(copy_path)
+                copy_hash: str = sha256_of(copy_path)
+            except (OSError, ValueError) as error:
+                messages.append(f"Unable to check {tag}: {error}")
+                continue
+            source_directory: Path = (self.root / item.source).parent
+            for number, path in markdown_imports(text):
+                if (source_directory / Path(path).expanduser()).is_file():
+                    messages.append(
+                        f"{tag}: its copy imports @{path} (line {number}); "
+                        "a rule must stand alone"
+                    )
+            same: str = imported.get(copy_hash, "")
+            if same:
+                messages.append(
+                    f"{tag} is the same as '{same}', which CLAUDE.md also "
+                    "imports"
+                )
+        for message in messages:
+            print(message, file=sys.stderr)
+
+    def claude_imports(self) -> dict[str, str]:
+        """Return the files that `CLAUDE.md` imports, keyed by SHA-256.
+
+        `CLAUDE.md` is in the directory that holds the collections.  An
+        import that is not a readable file is left out.
+        """
+        claude: Path = self.items_directory.parent / "CLAUDE.md"
+        try:
+            text: str = read_file(claude)
+        except (OSError, ValueError):
+            return {}
+        imported: dict[str, str] = {}
+        for _, path in markdown_imports(text):
+            with contextlib.suppress(OSError):
+                imported[
+                    sha256_of(claude.parent / Path(path).expanduser())
+                ] = path
+        return imported
+
+    def refresh_rule(self, item: Item, force: bool = False) -> str:
+        """Refresh the copy of the source of rule `item`.
+
+        The copy is left alone if it is the same as the source (the hash
+        is recorded if it was not), or if it was edited in place (its hash
+        is not the recorded one), unless `force`, or if the source is
+        missing.  Otherwise the source is copied to a temporary file,
+        which is made read-only and then replaces the copy, and its hash
+        and the time are recorded in `.item.json`.  Returns what was done
+        or what is wrong, or an empty string if nothing was done.
+        """
+        tag: str = f"{self.prefix}{item.tag}"
+        item_directory: Path = self.directories[item.name]
+        source_path: Path = self.root / item.source
+        copy_path: Path = self.copy_path(item)
+        try:
+            metadata: dict[str, object] = read_item(item_directory)
+            recorded: str = str(metadata.get("sha256", ""))
+            copy_hash: str = (
+                sha256_of(copy_path) if copy_path.exists() else ""
+            )
+            source: bytes = (
+                source_path.read_bytes() if source_path.is_file() else b""
+            )
+            source_hash: str = (
+                hashlib.sha256(source).hexdigest() if source_path.is_file()
+                else ""
+            )
+            if copy_hash and copy_hash == source_hash:
+                if recorded != copy_hash:
+                    metadata["sha256"] = copy_hash
+                    metadata.setdefault("refreshed", utc_stamp(time.time()))
+                    write_item(item_directory, metadata)
+                return ""
+            if copy_hash and copy_hash != recorded and not force:
+                return (
+                    f"{tag}: its copy '{copy_path}' was edited in place; "
+                    f"`tracker {tag} refresh` replaces it with its source "
+                    f"'{item.source}'"
+                )
+            if not source_hash:
+                return f"{tag}: its source '{item.source}' is missing" + (
+                    "; its last copy is kept" if copy_hash else ""
+                )
+            temporary: Path = item_directory / COPY_TEMPORARY
+            temporary.unlink(missing_ok=True)
+            temporary.write_bytes(source)
+            temporary.chmod(0o444)
+            temporary.replace(copy_path)
+            metadata["sha256"] = source_hash
+            metadata["refreshed"] = utc_stamp(time.time())
+            write_item(item_directory, metadata)
+        except (OSError, ValueError) as error:
+            return f"Unable to refresh {tag}: {error}"
+        return f"Refreshed {tag} from '{item.source}'"
 
     def fix_gaps(self) -> None:
         """Renumber the items if there are gaps, reporting it to stderr.
@@ -1100,9 +1489,12 @@ class Items:
     def add_missing_summaries(self) -> None:
         """Give an empty `Summary.md` to every item that does not have one.
 
-        This is for items made before `Summary.md` existed.  A file that
-        can not be written is reported to stderr.
+        This is for items made before `Summary.md` existed, so it is only
+        done if the collection's type has a `Summary.md`.  A file that can
+        not be written is reported to stderr.
         """
+        if not self.has_file("Summary.md"):
+            return
         for item in self.list_items():
             item_directory: Path = self.directories[item.name]
             if (item_directory / "Summary.md").exists():
@@ -1236,21 +1628,31 @@ class Items:
         tag: str = unique_tag(
             base_tag(title), (other.tag for other in self.items.values())
         )
-        item: Item = Item(name, title, created=stamp, updated=stamp, tag=tag)
+        item: Item = Item(
+            name,
+            title,
+            self.collection_type.new_state,
+            created=stamp,
+            updated=stamp,
+            tag=tag,
+        )
         try:
             item_directory.mkdir()
             write_item(
                 item_directory, {**new_metadata(item.state, stamp), "tag": tag}
             )
-            write_file(
-                item_directory / "Context.md", "# LLM Agent Context Log\n"
-            )
+            if self.has_file("Context.md"):
+                write_file(
+                    item_directory / "Context.md", "# LLM Agent Context Log\n"
+                )
             write_file(
                 item_directory / "Details.md", f"# {number} {title}\n"
             )
-            write_summary_heading(
-                item_directory, summary_heading(f"{self.prefix}{tag}", title)
-            )
+            if self.has_file("Summary.md"):
+                write_summary_heading(
+                    item_directory,
+                    summary_heading(f"{self.prefix}{tag}", title),
+                )
         except OSError as error:
             return (
                 f"Unable to create item directory '{item_directory}': {error}"
@@ -1317,9 +1719,11 @@ class Items:
             if not heading.startswith(f"# {number} "):
                 rest = details
             write_file(details_path, f"# {number} {title}\n{rest}")
-            write_summary_heading(
-                old_directory, summary_heading(f"{self.prefix}{tag}", title)
-            )
+            if self.has_file("Summary.md"):
+                write_summary_heading(
+                    old_directory,
+                    summary_heading(f"{self.prefix}{tag}", title),
+                )
             updated: str = update_item(old_directory, fields={"tag": tag})
             old_directory.rename(new_directory)
         except (OSError, ValueError) as error:
@@ -1523,11 +1927,20 @@ class Items:
         updated time is set to now and the change is added to its history.
         Returns the selected items, or an error string on failure.
         """
-        if state not in STATES:
-            return f"State '{state}' is not one of {', '.join(STATES)}"
+        states: tuple[str, ...] = self.collection_type.states
+        if state not in states:
+            return f"State '{state}' is not one of {', '.join(states)}"
         changed: list[Item] | str = self.select_items(name, recursive)
         if isinstance(changed, str):
             return changed
+        if self.collection_type.has_sources and state == "Active":
+            for item in changed:
+                if not item.source or not self.copy_path(item).is_file():
+                    tag: str = f"{self.prefix}{item.tag}"
+                    return (
+                        f"{tag} has no copy of a source to make Active; "
+                        f"`tracker {tag} source PATH` sets its source"
+                    )
         for item in changed:
             if item.state == state:
                 continue
@@ -1576,6 +1989,156 @@ class Items:
             )
         return self.set_feature(found[0], command == "enable")
 
+    def set_source(self, name: tuple[int, ...], path: Path) -> Item | str:
+        """Make the file at `path` the source of rule `name`, and copy it.
+
+        The source is kept relative to `root`, after the directories in
+        `path` are resolved to real ones; the file name is kept, so a file
+        that is a symbolic link is followed whenever it is read.  A copy
+        of the old source is removed, and the copy is always replaced.
+        Returns the rule, or an error string on failure.
+        """
+        selected: list[Item] | str = self.select_items(name)
+        if isinstance(selected, str):
+            return selected
+        item: Item = selected[0]
+        if not path.is_file():
+            return f"'{path}' is not a file"
+        if path.name in RESERVED_NAMES or path.name.startswith("."):
+            return f"A source can not be named '{path.name}'"
+        source: str = Path(
+            os.path.relpath(path.absolute().parent.resolve(), self.root)
+        ).joinpath(path.name).as_posix()
+        item_directory: Path = self.directories[name]
+        try:
+            if item.source:
+                self.copy_path(item).unlink(missing_ok=True)
+            item.updated = update_item(
+                item_directory,
+                fields={"source": source, "sha256": None, "refreshed": None},
+            )
+        except (OSError, ValueError) as error:
+            return (
+                f"Unable to set the source of {self.prefix}{item.tag}: "
+                f"{error}"
+            )
+        item.source = source
+        message: str = self.refresh_rule(item, force=True)
+        if message.startswith("Unable"):
+            return message
+        return item
+
+    def source_command(self, arguments: list[str]) -> str:
+        """Run `source NUMBER PATH`: set the source of a rule and copy it.
+
+        Returns an empty string on success, or an error string on failure.
+        """
+        if len(arguments) != 2:
+            return "Usage: tracker COLLECTION source NUMBER PATH"
+        name: tuple[int, ...] | str = self.resolve(arguments[0])
+        if isinstance(name, str):
+            return name
+        changed: Item | str = self.set_source(name, Path(arguments[1]))
+        if isinstance(changed, str):
+            return changed
+        self.show([changed])
+        return ""
+
+    def refresh_command(
+        self, arguments: list[str], ask: Callable[[str], str] = input
+    ) -> str:
+        """Run `refresh NUMBER`: copy a rule's source over its copy.
+
+        A copy that was edited in place is only replaced if `ask` gets a
+        yes answer.  Returns an empty string on success, or an error string
+        on failure.
+        """
+        if len(arguments) != 1:
+            return "Usage: tracker COLLECTION refresh NUMBER"
+        name: tuple[int, ...] | str = self.resolve(arguments[0])
+        if isinstance(name, str):
+            return name
+        selected: list[Item] | str = self.select_items(name)
+        if isinstance(selected, str):
+            return selected
+        item: Item = selected[0]
+        tag: str = f"{self.prefix}{item.tag}"
+        if not item.source:
+            return (
+                f"{tag} has no source; `tracker {tag} source PATH` sets one"
+            )
+        message: str = self.refresh_rule(item)
+        if "edited in place" in message:
+            try:
+                answer: str = ask(
+                    f"Replace the edited copy of {tag} with its source "
+                    f"'{item.source}'? (y=Yes, n=No) "
+                )
+            except EOFError:
+                answer = ""
+            if answer.strip().casefold() not in ("y", "yes"):
+                return "Not refreshed"
+            message = self.refresh_rule(item, force=True)
+        if message.startswith(("Unable", tag)):
+            return message
+        print(message or f"{tag} is up to date")
+        return ""
+
+    def create_rules(self, place: str, word: str, paths: list[Path]) -> str:
+        """Create a rule for each of `paths`, at a place (see `plan_place()`).
+
+        The first rule goes at `word` (a number, or a number or tag with a
+        `place`), and each of the others after the one before.  Each is
+        titled from its file name and has its source set.  The rules are
+        printed.  Returns an empty string on success, or an error string on
+        failure.
+        """
+        created: list[Item] = []
+        for path in paths:
+            title: str = path.stem.replace("_", " ")
+            item: Item | str = (
+                self.create_item(created[-1].number, title, "after")
+                if created
+                else self.create_item(word, title, place)
+            )
+            if isinstance(item, str):
+                return item
+            created.append(item)
+            sourced: Item | str = self.set_source(item.name, path)
+            if isinstance(sourced, str):
+                return sourced
+        self.show(created)
+        return ""
+
+    def type_command(self, arguments: list[str]) -> str:
+        """Run `type [TYPE]`: print or set the type of the collection.
+
+        TYPE may be any unique prefix of a type.  The type can only be
+        changed while the collection is empty, so that no item is left in
+        a state that its type does not have.  Returns an empty string on
+        success, or an error string on failure.
+        """
+        found: list[str] = matches(arguments[0], TYPES) if arguments else []
+        if len(arguments) > 1 or (arguments and len(found) != 1):
+            return (
+                "Usage: tracker COLLECTION type [TYPE], where TYPE is one "
+                f"of: {', '.join(TYPES)}"
+            )
+        name: str = self.items_directory.name
+        if found and found[0] != self.collection_type_name:
+            if self.items:
+                return (
+                    f"The type of '{name}' can only be changed while it has "
+                    "no items"
+                )
+            error: str = self.save_settings(
+                {**self.settings, "type": found[0]}
+            )
+            if error:
+                return error
+        print(f"{name}: {self.collection_type_name}")
+        return ""
+
     def priority_command(self, arguments: list[str]) -> str:
         """Run `priority NUMBER LEVEL`.
 
@@ -1604,16 +2167,25 @@ class Items:
     def create_command(self, arguments: list[str]) -> str:
         """Run `create [before|after] NUMBER TITLE...`.
 
+        In a collection with sources it is `create [before|after] NUMBER
+        FILE...` (see `create_rules()`).
+
         Returns an empty string on success, or an error string on failure.
         """
         place: str = ""
         if arguments and arguments[0] in PLACES:
             place, arguments = arguments[0], arguments[1:]
+        sources: bool = self.collection_type.has_sources
         if len(arguments) < 2:
             return (
                 "Usage: tracker COLLECTION create [before|after] NUMBER "
-                "TITLE..."
+                + ("FILE..." if sources else "TITLE...")
             )
+        if sources:
+            paths: list[Path] | str = expand_files(arguments[1:])
+            if isinstance(paths, str):
+                return paths
+            return self.create_rules(place, arguments[0], paths)
         result: Item | str = self.create_item(
             arguments[0], " ".join(arguments[1:]), place
         )
@@ -1696,6 +2268,15 @@ class Items:
                 "Priority:  "
                 f"{'-' if item.priority is None else item.priority}"
             )
+        if self.collection_type.has_sources:
+            lines += [
+                f"Source:    {item.source or '-'}",
+                f"SHA-256:   {metadata.get('sha256', '-')}",
+                (
+                    "Refreshed: "
+                    f"{local_time(str(metadata.get('refreshed', '')))}"
+                ),
+            ]
         lines += [
             f"Created:   {local_time(item.created)}",
             f"Updated:   {local_time(item.updated)}",
@@ -1752,7 +2333,8 @@ class Items:
             shown: list[Item] = [
                 item
                 for item in listed
-                if item.state not in FINISHED_STATES or item.name == name
+                if item.state not in self.collection_type.finished_states
+                or item.name == name
             ]
             hidden = len(listed) - len(shown)
             listed = shown
@@ -1784,15 +2366,9 @@ class Items:
         if isinstance(parsed, str):
             return parsed
         name, recursive = parsed
-        state: str = {
-            "pending": "Pending",
-            "open": "Open",
-            "reference": "Reference",
-            "suspend": "Suspended",
-            "close": "Closed",
-            "reject": "Rejected",
-        }[command]
-        changed: list[Item] | str = self.set_state(name, state, recursive)
+        changed: list[Item] | str = self.set_state(
+            name, STATE_COMMANDS[command], recursive
+        )
         if isinstance(changed, str):
             return changed
         self.show(changed)
@@ -1976,7 +2552,7 @@ class Items:
             ]
             counts: list[str] = [
                 f"{states.count(state)} {state}"
-                for state in STATES
+                for state in ALL_STATES
                 if state in states
             ]
             total: int = len(items.items)
@@ -2027,10 +2603,15 @@ class Items:
         if not found and tag_collection(arguments[0], names):
             found = [tag_collection(arguments[0], names)]
             tag = arguments[0]
-        commands: list[str] = (
-            sorted(
-                {COMMANDS[name] for name in matches(arguments[1], COMMANDS)}
-            )
+        # A collection's type decides its commands; when there is no such
+        # collection, every command is allowed (for `tracker NAME create`).
+        known: dict[str, str] = commands(
+            type_name(directories[names.index(found[0])])
+            if len(found) == 1
+            else ""
+        )
+        matched: list[str] = (
+            sorted({known[name] for name in matches(arguments[1], known)})
             if len(arguments) > 1
             else []
         )
@@ -2043,19 +2624,19 @@ class Items:
             )
         elif len(arguments) < 2:
             error = "Usage: tracker COLLECTION COMMAND [ARGUMENTS...]"
-        elif not commands:
+        elif not matched:
             error = (
                 f"Unknown command '{arguments[1]}'; the commands are: "
-                f"{', '.join(COMMANDS)}"
+                f"{', '.join(known)}"
             )
-        elif len(commands) > 1:
+        elif len(matched) > 1:
             error = (
                 f"'{arguments[1]}' matches more than one command: "
-                f"{', '.join(commands)}"
+                f"{', '.join(matched)}"
             )
-        elif tag and commands[0] not in TAG_COMMANDS:
-            error = f"A tag can not be used with '{commands[0]}'"
-        elif not found and commands == ["create"] and len(arguments) == 2:
+        elif tag and matched[0] not in TAG_COMMANDS:
+            error = f"A tag can not be used with '{matched[0]}'"
+        elif not found and matched == ["create"] and len(arguments) == 2:
             return Items.create_collection(arguments[0], directories, ask)
         elif not found:
             error = f"No collection matches '{arguments[0]}'"
@@ -2072,7 +2653,7 @@ class Items:
         if items.error:
             return 1
         rest: list[str] = ([tag] if tag else []) + arguments[2:]
-        match commands[0]:
+        match matched[0]:
             case "help":
                 print(HELP)
             case "create":
@@ -2089,18 +2670,23 @@ class Items:
                 error = items.move_command(rest, ask)
             case "show":
                 error = items.show_command(rest)
+            case "type":
+                error = items.type_command(rest)
+            case "source":
+                error = items.source_command(rest)
+            case "refresh":
+                error = items.refresh_command(rest, ask)
             case "enable" | "disable":
-                error = items.feature_command(commands[0], rest)
+                error = items.feature_command(matched[0], rest)
             case state_command:
                 error = items.state_command(state_command, rest)
         if not error:
-            error = write_startup(
-                [
-                    collection
-                    for collection in collections
-                    if not collection.error
-                ]
-            )
+            loaded: list[Items] = [
+                collection
+                for collection in collections
+                if not collection.error
+            ]
+            error = write_startup(loaded) or write_active_rules(loaded)
         if error:
             print(error, file=sys.stderr)
             return 1
@@ -2137,12 +2723,15 @@ def write_startup(collections: list["Items"]) -> str:
     for collection in [startup] + [
         collection for collection in collections if collection is not startup
     ]:
+        collection_type: CollectionType = collection.collection_type
+        if not collection_type.in_startup:
+            continue
         for item in collection.list_items():
             item_directory: Path = collection.directories[item.name]
             relative: str = Path(
                 os.path.relpath(item_directory, startup.items_directory)
             ).as_posix()
-            if item.state in FINISHED_STATES:
+            if item.state in collection_type.finished_states:
                 closed.append(
                     (
                         closed_time(item, item_directory),
@@ -2154,7 +2743,7 @@ def write_startup(collections: list["Items"]) -> str:
                 )
                 continue
             file_names: tuple[str, ...] = ("Details.md",)
-            if item.state in CONTEXT_STATES:
+            if item.state in collection_type.context_states:
                 file_names += ("Context.md",)
             for file_name in file_names:
                 if (item_directory / file_name).is_file():
@@ -2179,6 +2768,33 @@ def write_startup(collections: list["Items"]) -> str:
     except OSError as error:
         return f"Unable to write '{startup_path}': {error}"
     return write_closed(startup.items_directory / "Closed.md", older)
+
+
+def write_active_rules(collections: list["Items"]) -> str:
+    """Write `Active_Rules.md` into each collection with sources.
+
+    Every line is an `@` import, relative to the collection, of the copy of
+    an Active item's source, in number order, so that adding
+    `@RULES/Active_Rules.md` to `CLAUDE.md` loads them.  Returns an empty
+    string on success, or an error string on failure.
+    """
+    for collection in collections:
+        if not collection.collection_type.has_sources:
+            continue
+        lines: list[str] = [
+            f"@{collection.directories[item.name].name}/"
+            f"{collection.copy_path(item).name}\n"
+            for item in collection.list_items()
+            if item.state == "Active"
+            and item.source
+            and collection.copy_path(item).is_file()
+        ]
+        path: Path = collection.items_directory / ACTIVE_RULES
+        try:
+            write_file(path, "".join(lines))
+        except OSError as error:
+            return f"Unable to write '{path}': {error}"
+    return ""
 
 
 def closed_time(item: "Item", item_directory: Path) -> str:
@@ -2244,7 +2860,7 @@ def print_items(
         for item in items
     }
     tag_width: int = max((len(tag) for tag in tags.values()), default=0)
-    state_width: int = max(len(state) for state in STATES)
+    state_width: int = max(len(state) for state in ALL_STATES)
     time_width: int = len("YYYY-MM-DD HH:MM")
     for index, item in enumerate(items):
         levels: str = (
