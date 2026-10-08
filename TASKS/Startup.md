@@ -1,5 +1,5 @@
 @8_Review_README.md_together/Details.md
-@9_Explore_moving_items_between_collections/Details.md
+@9_Explore_moving_items_between_collections/Summary.md
 @../ISSUES/1_Per_collection_state_sets/Summary.md
 @7_Explore_Having_a_Rules_Collection/Summary.md
 @10_Hide_closed_items_and_check_on_startup/Summary.md

@@ -59,8 +59,8 @@ with the following information:
 * `.item.json`:
   A hidden file managed by `tracker` that holds the State, Tag, Priority,
   the created and updated times (in UTC), and a history of every State
-  change; for a rule, also its source, the SHA-256 of its copy and when
-  the copy was refreshed.
+  change, and of every transfer to another collection; for a rule, also
+  its source, the SHA-256 of its copy and when the copy was refreshed.
 
 Every time `tracker` runs, it rewrites `TASKS/Startup.md`.  It contains only
 Claude Code `@` imports: one for the `Details.md` of every Item that is not
@@ -74,8 +74,8 @@ and title only.  (The test suite changes the 50 with
 `CLAUDE.md` loads them at the start of each AI session.  Rules are not in
 `TASKS/Startup.md` (see "Rules Collections".)
 
-There is no undo; use a version control system.  Before a move or rename,
-if the collection has had no move or rename for over an hour (the time is
+There is no undo; use a version control system.  Before a move, rename or
+transfer, if the collection has had none for over an hour (the time is
 kept in its `.tracker.json`), `tracker` recommends taking a snapshot first
 (e.g. `git commit`) and asks whether to continue.  The test suite
 shortens the hour with the `TRACKER_TEST_MOVE_RENAME_DELAY_SECONDS`
@@ -88,17 +88,32 @@ priority, times, state history, directory and `Details.md`.  When a rename
 changes a tag, `tracker` lists the writable `.md` files in the project
 that use the old tag and offers to update them.
 
+An Item that belongs in another collection (e.g. a Task that turns out to
+be an Issue) is moved there, with its children, by `tracker t transfer
+T.fbm issues [PLACE]`.  The PLACE is as for `move` (by default the next
+free top-level number), and both collections are renumbered to leave no
+gaps.  The tag gets the new collection's prefix (`T.fbm` becomes `I.fbm`),
+and keeps the rest unless that is taken there (then it gets the lowest
+free number, as for `create`); a transfer back gets the old tag back if it
+is free.  The title, state and its history, priority and files are kept,
+and the transfer is recorded in `.item.json` and shown by `show`.  Old
+tags are not looked up, but, as for a rename, `tracker` offers to update
+every `.md` file that uses them, in one pass.  Items can only be
+transferred between collections of the same type.
+
 `tracker t ls` leaves out Closed Items (unless asked for by number or tag)
 and says how many it left out; `tracker t ls -a` lists them all.
 
 A renumbering (from a create, delete or move) first writes its plan to a
-hidden `.renumber.json` in the collection.  If it is interrupted, the next
-`tracker` command finishes it and says so.  Every command also checks the
-collections it loads, so nobody has to remember to: it fixes what `tracker`
-maintains (the number in the `# N Title` heading of `Details.md`, the
-heading of `Summary.md`) and reports what a person maintains (a missing
-heading, a title edited so that it no longer matches the directory name,
-two Items with the same tag), saying how to fix it.
+hidden `.renumber.json` in the collection, and a transfer writes its plan
+to a hidden `.transfer.json` in the collection it comes from.  If either
+is interrupted, the next `tracker` command finishes it and says so.
+Every command also checks the collections it loads, so nobody has to
+remember to: it fixes what `tracker` maintains (the number in the `# N
+Title` heading of `Details.md`, the heading of `Summary.md`) and reports
+what a person maintains (a missing heading, a title edited so that it no
+longer matches the directory name, two Items with the same tag), saying
+how to fix it.
 
 Run `tracker` with no arguments to list the collections, one line each, and
 `tracker -h` to list the commands.  `tracker t ls -l` also lists the created

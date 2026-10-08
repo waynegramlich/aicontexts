@@ -42,12 +42,20 @@ free number of a level (e.g. `1.3`), or `before NUMBER` / `after NUMBER`
 (e.g. `tracker t move T.fbm after 2.1`, or `tracker t create before 1.1
 Fix Big Mistake`).  `rename NUMBER to TITLE...` changes a title.  There is
 no undo: when `tracker` recommends a version control snapshot before a
-move or rename and asks whether to continue, Claude answers no, takes an
-`hg` checkpoint, and then runs the command again.  `delete` is
+move, rename or transfer and asks whether to continue, Claude answers no,
+takes an `hg` checkpoint, and then runs the command again.  `delete` is
 permanent: it refuses an item with children unless given `-r` (which asks
 first), and renumbers the later items.  Never run `delete` (or other
 changing commands) on the real items just to see what happens; try it in
 a scratch directory.
+
+An item that belongs in another collection of the same type (e.g. a Task
+that turns out to be an Issue) is moved there, with its children, by
+`tracker t transfer T.fbm issues [PLACE]`.  Its tag gets the new prefix
+(`T.fbm` becomes `I.fbm`), and `tracker` offers to update the `.md` files
+that use the old tags; as for a rename, Claude answers yes after checking
+the list.  Old tags are not looked up afterwards, so text must use the new
+ones.
 
 When priority is enabled for a collection (e.g. `tracker i enable
 priority`, as it is for `ISSUES/`), items may have a priority set with

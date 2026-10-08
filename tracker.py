@@ -38,6 +38,11 @@ Commands:
                           FILE (or glob pattern), at PLACE and after
   move NUMBER PLACE       Move an item, with its children, to PLACE.
                           NUMBER may be a range of siblings, like 1.2.5-6
+  transfer NUMBER COLLECTION [PLACE]
+                          Move an item, with its children, to PLACE in
+                          another collection of the same type (by default
+                          its next free top-level number); its tag gets
+                          the new prefix.  NUMBER may be a range
   rename NUMBER to TITLE...
                           Change the title of an item
   delete [-r] NUMBER      Delete an item and all of its files; with -r,
@@ -79,10 +84,10 @@ PLACE is one of:
                   down one
   after NUMBER    Just after item NUMBER; its later siblings move down one
 Deleting or moving items moves the later siblings (and their children) up
-to close the gap.  There is no undo.  Before a move or rename, if the last
-one in the collection was more than an hour ago, tracker recommends taking
-a version control snapshot (e.g. `git commit`) first, and asks whether to
-continue.
+to close the gap.  There is no undo.  Before a move, rename or transfer,
+if the last one in the collection was more than an hour ago, tracker
+recommends taking a version control snapshot (e.g. `git commit`) first,
+and asks whether to continue.
 
 Each collection has a type, kept in its `.tracker.json`, which decides its
 states, the files of its items and what Startup.md imports.  A new
@@ -264,7 +269,7 @@ INTERRUPT_VARIABLE: str = "TRACKER_TEST_RENUMBER_INTERRUPT"
 # COMMAND ...` can be used.
 TAG_COMMANDS: frozenset[str] = frozenset(
     {
-        "rename", "delete", "list", "show", "priority", "move",
+        "rename", "delete", "list", "show", "priority", "move", "transfer",
         *STATE_COMMANDS, *TYPE_COMMANDS,
     }
 )
@@ -275,6 +280,16 @@ TAG_COMMANDS: frozenset[str] = frozenset(
 # `SUMMARIES_VARIABLE`.
 CLOSED_SUMMARIES: int = 50
 SUMMARIES_VARIABLE: str = "TRACKER_TEST_CLOSED_SUMMARIES"
+
+# The hidden JSON file that holds a transfer of items to another collection
+# while it is being done, so that an interrupted transfer can be finished.
+TRANSFER_FILE: str = ".transfer.json"
+
+# The keys of each item in `.transfer.json`.
+TRANSFER_KEYS: tuple[str, ...] = (
+    "old", "temporary", "new", "old_number", "new_number", "tag",
+    "old_tag", "new_tag", "title", "summary",
+)
 
 # The keys of each rename in `.renumber.json`.
 RENAME_KEYS: tuple[str, ...] = (
@@ -315,6 +330,7 @@ COMMANDS: dict[str, str] = {
     "ls": "list",
     "priority": "priority",
     "move": "move",
+    "transfer": "transfer",
     "show": "show",
     "enable": "enable",
     "disable": "disable",
@@ -853,6 +869,7 @@ class Items:
         if self.error:
             print(self.error, file=sys.stderr)
         else:
+            recover_transfers(items_directory.parent)
             self.recover_renumber()
             self.load_items()
 
@@ -971,9 +988,9 @@ class Items:
         return self.save_settings({**self.settings, feature: enabled})
 
     def confirm_snapshot(self, ask: Callable[[str], str]) -> bool:
-        """Before a move or rename, recommend a version control snapshot.
+        """Before a move, rename or transfer, recommend a snapshot.
 
-        If there has been no move or rename in this collection for
+        If there has been no move, rename or transfer in this collection for
         `MOVE_RENAME_DELAY_SECONDS` (or the seconds in the `DELAY_VARIABLE`
         environment variable), a reminder is printed to stderr and `ask`
         asks whether to continue.  Returns whether to go ahead.
@@ -990,15 +1007,16 @@ class Items:
             elapsed = delay
         if elapsed >= delay:
             print(
-                f"No move or rename in '{self.items_directory.name}' for "
+                "No move, rename or transfer in "
+                f"'{self.items_directory.name}' for "
                 + (
                     "over an hour"
                     if delay == MOVE_RENAME_DELAY_SECONDS
                     else f"over {delay:g} seconds"
                 )
                 + "; consider taking a version control "
-                "snapshot (e.g. `git commit`) before moving or renaming "
-                "items.",
+                "snapshot (e.g. `git commit`) before moving, renaming or "
+                "transferring items.",
                 file=sys.stderr,
             )
             try:
@@ -1095,20 +1113,26 @@ class Items:
                 )
         return sorted(missing)
 
-    def gap_free_names(self) -> dict[tuple[int, ...], tuple[int, ...]]:
+    def gap_free_names(
+        self, names: Iterable[tuple[int, ...]] | None = None
+    ) -> dict[tuple[int, ...], tuple[int, ...]]:
         """Return the new name of each item whose name must change.
 
-        Items keep their order.  An item whose parent is missing becomes
-        a child of its nearest existing ancestor.
+        The items are `names`, or else all of them.  Items keep their
+        order.  An item whose parent is missing becomes a child of its
+        nearest existing ancestor.
         """
+        present: set[tuple[int, ...]] = set(
+            self.items if names is None else names
+        )
         new_names: dict[tuple[int, ...], tuple[int, ...]] = {}
         counts: dict[tuple[int, ...], int] = {}
-        for name in sorted(self.items):
+        for name in sorted(present):
             parent: tuple[int, ...] = next(
                 (
                     name[:length]
                     for length in range(len(name) - 1, 0, -1)
-                    if name[:length] in self.items
+                    if name[:length] in present
                 ),
                 (),
             )
@@ -1132,6 +1156,22 @@ class Items:
         """
         if not new_names:
             return ""
+        renames: list[dict[str, str]] = self.rename_records(new_names)
+        error: str = do_renumber(self.items_directory, renames, 1)
+        if error and not (self.items_directory / RENUMBER_FILE).exists():
+            return error
+        # Even after a failure, the items are where the plan puts them,
+        # since the next load finishes the plan.
+        self.apply_renames(new_names)
+        return error
+
+    def rename_records(
+        self, new_names: dict[tuple[int, ...], tuple[int, ...]]
+    ) -> list[dict[str, str]]:
+        """Return the renames that give the items `new_names`.
+
+        Each has the `RENAME_KEYS` of `.renumber.json`, in name order.
+        """
         renames: list[dict[str, str]] = []
         for index, old in enumerate(sorted(new_names)):
             title_part: str = self.directories[old].name.partition("_")[2]
@@ -1144,84 +1184,26 @@ class Items:
                     "new_number": number_text(new_names[old]),
                 }
             )
-        error: str = self.do_renumber(renames, 1)
-        if error and not (self.items_directory / RENUMBER_FILE).exists():
-            return error
-        # Even after a failure, the items are where the plan puts them,
-        # since the next load finishes the plan.
+        return renames
+
+    def apply_renames(
+        self, new_names: dict[tuple[int, ...], tuple[int, ...]]
+    ) -> None:
+        """Give the items `new_names` in memory, after their directories."""
         moving: list[Item] = [self.items[old] for old in sorted(new_names)]
+        directories: list[Path] = [
+            self.directories[item.name] for item in moving
+        ]
         for item in moving:
             del self.items[item.name]
             del self.directories[item.name]
-        for item, rename in zip(moving, renames, strict=True):
+        for item, directory in zip(moving, directories, strict=True):
             item.name = new_names[item.name]
             self.items[item.name] = item
             self.directories[item.name] = (
-                self.items_directory / rename["new"]
+                self.items_directory
+                / f"{item.number}_{directory.name.partition('_')[2]}"
             )
-        return error
-
-    def do_renumber(self, renames: list[dict[str, str]], phase: int) -> str:
-        """Do the `renames` of a renumbering, starting at `phase`.
-
-        Phase 1 renames the old directories to temporary names, phase 2
-        renames those to the new names, and phase 3 rewrites the headings.
-        Each step is skipped if it has already been done, and
-        `.renumber.json` records the phase until the end, when it is
-        removed.  Returns an empty string on success, or an error string
-        on failure.
-        """
-        marker: Path = self.items_directory / RENUMBER_FILE
-        limit: str = os.environ.get(INTERRUPT_VARIABLE, "")
-        steps: list[int] = [0]
-
-        def step() -> None:
-            steps[0] += 1
-            if limit.isdecimal() and steps[0] > int(limit):
-                raise RenumberInterrupted
-
-        def path(rename: dict[str, str], key: str) -> Path:
-            return self.items_directory / rename[key]
-
-        try:
-            write_file(
-                marker,
-                json.dumps({"phase": phase, "renames": renames}, indent=2)
-                + "\n",
-            )
-            if phase == 1:
-                for rename in renames:
-                    if path(rename, "old").exists() and not path(
-                        rename, "temporary"
-                    ).exists():
-                        step()
-                        path(rename, "old").rename(path(rename, "temporary"))
-                write_file(
-                    marker,
-                    json.dumps({"phase": 2, "renames": renames}, indent=2)
-                    + "\n",
-                )
-            for rename in renames:
-                if path(rename, "temporary").exists():
-                    step()
-                    path(rename, "temporary").rename(path(rename, "new"))
-            for rename in renames:
-                details_path: Path = path(rename, "new") / "Details.md"
-                details: str = read_file(details_path)
-                prefix: str = f"# {rename['old_number']} "
-                if details.startswith(prefix):
-                    step()
-                    write_file(
-                        details_path,
-                        f"# {rename['new_number']} {details[len(prefix):]}",
-                    )
-            marker.unlink()
-        except OSError as error:
-            return (
-                f"Unable to renumber items in '{self.items_directory}': "
-                f"{error}"
-            )
-        return ""
 
     def recover_renumber(self) -> None:
         """Finish an interrupted renumbering, if there is one.
@@ -1236,7 +1218,7 @@ class Items:
             plan: object = json.loads(read_file(marker))
             if not isinstance(plan, dict):
                 raise TypeError("it is not a JSON object")
-            phase: int = int(plan["phase"])
+            phase: int = int(str(plan["phase"]))
             renames: list[dict[str, str]] = [
                 {key: str(rename[key]) for key in RENAME_KEYS}
                 for rename in plan["renames"]
@@ -1244,7 +1226,7 @@ class Items:
         except (OSError, ValueError, TypeError, KeyError) as problem:
             error = f"Unable to read '{marker}': {problem!r}"
         else:
-            error = self.do_renumber(renames, phase)
+            error = do_renumber(self.items_directory, renames, phase)
         if error:
             print(
                 f"Unable to finish an interrupted renumbering: {error}",
@@ -1739,15 +1721,17 @@ class Items:
         moving: list[tuple[int, ...]],
         place: str,
         target: tuple[int, ...],
+        count: int = 1,
     ) -> tuple[dict[tuple[int, ...], tuple[int, ...]], tuple[int, ...]] | str:
-        """Plan putting the `moving` siblings (or a new item) at a place.
+        """Plan putting the `moving` siblings (or new items) at a place.
 
         `place` is "" for the free number `target`, or "before" or "after"
         the existing item `target`.  `moving` is empty for a new item.  The
         names refer to the items before anything moves.  Returns the new
         name of every item whose name changes, and the new name of the
         first moved (or new) item, or an error string if the place is not
-        valid.
+        valid.  When `moving` is empty, room is made for `count` new
+        sibling items, numbered from the first one.
         """
         for name in moving:
             if name not in self.items:
@@ -1791,8 +1775,13 @@ class Items:
             if place
             else len(siblings)
         )
-        siblings[index:index] = moving or [NEW_ITEM]
-        children[NEW_ITEM] = []
+        # Stand-ins for the new items; no item has a 0 in its name.
+        new_items: list[tuple[int, ...]] = [NEW_ITEM] + [
+            (0, index) for index in range(1, count)
+        ]
+        siblings[index:index] = moving or new_items
+        for new_item in new_items:
+            children[new_item] = []
         new_names: dict[tuple[int, ...], tuple[int, ...]] = {}
 
         def number(
@@ -1803,11 +1792,11 @@ class Items:
                 number(name, new_names[name])
 
         number((), ())
-        first: tuple[int, ...] = new_names[(moving or [NEW_ITEM])[0]]
+        first: tuple[int, ...] = new_names[(moving or new_items)[0]]
         return {
             old: new
             for old, new in new_names.items()
-            if old != new and old != NEW_ITEM
+            if old != new and old not in new_items
         }, first
 
     def resolve_range(self, word: str) -> list[tuple[int, ...]] | str:
@@ -1917,6 +1906,148 @@ class Items:
             number_text(old): self.items[new]
             for old, new in sorted(new_names.items())
         }
+
+    def check_transfer(
+        self,
+        names: list[tuple[int, ...]],
+        target: "Items",
+        place: str,
+        word: str,
+    ) -> tuple[int, ...] | str:
+        """Check a transfer of the items `names` (see `transfer_items()`).
+
+        Returns the name in `target` of the place `word`, or an error
+        string if the transfer is not valid.
+        """
+        if target.items_directory == self.items_directory:
+            return (
+                "Items can not be transferred to their own collection; use "
+                "move"
+            )
+        if target.collection_type_name != self.collection_type_name:
+            return (
+                f"Items can not be transferred from '"
+                f"{self.items_directory.name}' (type "
+                f"{self.collection_type_name}) to '"
+                f"{target.items_directory.name}' (type "
+                f"{target.collection_type_name})"
+            )
+        for name in names:
+            if name not in self.items:
+                return f"Item '{number_text(name)}' does not exist"
+        first: tuple[int, ...] | str = (
+            target.resolve(word) if place else parse_number(word)
+        )
+        if isinstance(first, str):
+            return first
+        planned: (
+            tuple[dict[tuple[int, ...], tuple[int, ...]], tuple[int, ...]]
+            | str
+        ) = target.plan_place([], place, first)
+        return planned if isinstance(planned, str) else first
+
+    def transfer_items(
+        self,
+        names: list[tuple[int, ...]],
+        target: "Items",
+        place: str,
+        word: str,
+    ) -> list[tuple[str, Item]] | str:
+        """Transfer the sibling items `names`, with their children, to
+        `target`, a collection of the same type, at a place there.
+
+        The items go `place` ("", "before" or "after") the item or number
+        `word` of `target` (see `plan_place()`), in order.  Each item keeps
+        the rest of its tag if it is free in `target`, or else gets a new
+        one as `create` does; its `Details.md` and `Summary.md` headings
+        are fixed, and the transfer is added to the "moves" list of its
+        `.item.json`.  Both collections are renumbered to leave no gaps.
+        The plan is first written to `.transfer.json` (see
+        `do_transfer()`), so that an interrupted transfer is finished the
+        next time a collection is loaded.  Returns each transferred item
+        with its old tag, or an error string on failure.
+        """
+        first: tuple[int, ...] | str = self.check_transfer(
+            names, target, place, word
+        )
+        if isinstance(first, str):
+            return first
+        planned: (
+            tuple[dict[tuple[int, ...], tuple[int, ...]], tuple[int, ...]]
+            | str
+        ) = target.plan_place([], place, first, len(names))
+        if isinstance(planned, str):  # pragma: no cover
+            # `check_transfer()` checked the place.
+            return planned
+        target_names, first_name = planned
+        moving: list[tuple[Item, tuple[int, ...]]] = [
+            (
+                item,
+                first_name[:-1]
+                + (first_name[-1] + index,)
+                + item.name[len(name):],
+            )
+            for index, name in enumerate(names)
+            for item in self.list_items(name)
+        ]
+        used: set[str] = {item.tag for item in target.items.values()}
+        records: list[dict[str, str]] = []
+        for index, (item, new_name) in enumerate(moving):
+            tag: str = (
+                item.tag
+                if item.tag not in used
+                else unique_tag(base_tag(item.title), used)
+            )
+            used.add(tag)
+            old_directory: Path = self.directories[item.name]
+            records.append(
+                {
+                    "old": old_directory.name,
+                    "temporary": f".transfer_{index}",
+                    "new": f"{number_text(new_name)}_"
+                    f"{old_directory.name.partition('_')[2]}",
+                    "old_number": item.number,
+                    "new_number": number_text(new_name),
+                    "tag": tag,
+                    "old_tag": f"{self.prefix}{item.tag}",
+                    "new_tag": f"{target.prefix}{tag}",
+                    "title": item.title,
+                    "summary": "yes" if target.has_file("Summary.md") else "",
+                }
+            )
+        moved: set[tuple[int, ...]] = {item.name for item, _ in moving}
+        source_names: dict[tuple[int, ...], tuple[int, ...]] = (
+            self.gap_free_names(
+                name for name in self.items if name not in moved
+            )
+        )
+        stamp: str = utc_stamp(time.time())
+        plan: dict[str, object] = {
+            "target": target.items_directory.name,
+            "time": stamp,
+            "items": records,
+            "source_renames": self.rename_records(source_names),
+            "target_renames": target.rename_records(target_names),
+        }
+        error: str = do_transfer(self.items_directory, plan, 1)
+        if error:
+            return error
+        for item, _ in moving:
+            del self.items[item.name]
+            del self.directories[item.name]
+        self.apply_renames(source_names)
+        target.apply_renames(target_names)
+        transferred: list[tuple[str, Item]] = []
+        for (item, new_name), record in zip(moving, records, strict=True):
+            item.name = new_name
+            item.tag = record["tag"]
+            item.updated = stamp
+            target.items[new_name] = item
+            target.directories[new_name] = (
+                target.items_directory / record["new"]
+            )
+            transferred.append((record["old_tag"], item))
+        return transferred
 
     def set_state(
         self, name: tuple[int, ...], state: str, recursive: bool = False
@@ -2238,6 +2369,104 @@ class Items:
         self.show_renumbered(renumbered)
         return ""
 
+    def transfer_command(
+        self,
+        arguments: list[str],
+        collections: list["Items"],
+        ask: Callable[[str], str] = input,
+    ) -> str:
+        """Run `transfer NUMBER COLLECTION [[before|after] NUMBER]`.
+
+        COLLECTION is one of `collections`, by any unique prefix.  Without
+        a place, the items go to the next free top-level number.  A valid
+        transfer may first ask to continue (see `confirm_snapshot()`).
+        Prints the transferred items and the renumbered ones, then offers
+        to change their old tags in the project's `.md` files (see
+        `update_references()`).  Returns an empty string on success, or an
+        error string on failure.
+        """
+        usage: str = (
+            "Usage: tracker COLLECTION transfer NUMBER COLLECTION "
+            "[[before|after] NUMBER]"
+        )
+        place: str = ""
+        if len(arguments) == 4 and arguments[2] in PLACES:
+            place = arguments[2]
+        elif len(arguments) not in (2, 3):
+            return usage
+        names: list[tuple[int, ...]] | str = self.resolve_range(arguments[0])
+        if isinstance(names, str):
+            return names
+        found: list[str] = matches(
+            arguments[1],
+            [collection.items_directory.name for collection in collections],
+        )
+        if len(found) != 1:
+            return (
+                f"'{arguments[1]}' does not match one collection: "
+                + ", ".join(
+                    collection.items_directory.name
+                    for collection in collections
+                )
+            )
+        target: Items = next(
+            collection
+            for collection in collections
+            if collection.items_directory.name == found[0]
+        )
+        if target.error:
+            return f"Collection '{found[0]}' can not be loaded"
+        word: str = (
+            arguments[-1]
+            if len(arguments) > 2
+            else str(
+                sum(1 for name in target.items if len(name) == 1) + 1
+            )
+        )
+        checked: tuple[int, ...] | str = self.check_transfer(
+            names, target, place, word
+        )
+        if isinstance(checked, str):
+            return checked
+        if not self.confirm_snapshot(ask):
+            return "Not transferred"
+        before: dict[int, tuple[str, Item]] = {
+            id(item): (item.number, item)
+            for collection in (self, target)
+            for item in collection.items.values()
+        }
+        transferred: list[tuple[str, Item]] | str = self.transfer_items(
+            names, target, place, word
+        )
+        if isinstance(transferred, str):
+            return transferred
+        error: str = self.note_move_or_rename() or target.note_move_or_rename()
+        if error:
+            return error
+        print("Transferred (old tag first):")
+        target.show(
+            [item for _, item in transferred],
+            old_numbers=[old_tag for old_tag, _ in transferred],
+        )
+        moved: set[int] = {id(item) for _, item in transferred}
+        for collection in (self, target):
+            renumbered: dict[str, Item] = {
+                before[id(item)][0]: item
+                for item in collection.list_items()
+                if id(item) not in moved
+                and before[id(item)][0] != item.number
+            }
+            if renumbered:
+                print(f"In {collection.items_directory.name}:")
+                collection.show_renumbered(renumbered)
+        return self.update_references(
+            {
+                old_tag: f"{target.prefix}{item.tag}"
+                for old_tag, item in transferred
+            },
+            ask,
+        )
+
     def show_command(self, arguments: list[str]) -> str:
         """Run `show NUMBER`: print an item's details and its `Details.md`.
 
@@ -2290,6 +2519,15 @@ class Items:
                     f"  {local_time(str(change.get('time', ''))):<16}  "
                     f"{change.get('state', '?')}"
                 )
+        moves: object = metadata.get("moves")
+        if isinstance(moves, list) and moves:
+            lines.append("Transfers:")
+            lines += [
+                f"  {local_time(str(move.get('time', ''))):<16}  "
+                f"{move.get('from', '?')} -> {move.get('to', '?')}"
+                for move in moves
+                if isinstance(move, dict)
+            ]
         print("\n".join(lines) + "\n")
         print(details, end="")
         return ""
@@ -2406,19 +2644,26 @@ class Items:
         new_tag: str = f"{self.prefix}{renamed.tag}"
         if new_tag == old_tag:
             return ""
-        return self.update_references(old_tag, new_tag, ask)
+        return self.update_references({old_tag: new_tag}, ask)
 
     def update_references(
-        self, old_tag: str, new_tag: str, ask: Callable[[str], str]
+        self, tags: dict[str, str], ask: Callable[[str], str]
     ) -> str:
-        """Offer to change `old_tag` to `new_tag` in the project's `.md` files.
+        """Offer to change each old tag of `tags` to its new tag in the
+        project's `.md` files, in one pass.
 
         The files are found by `tag_references()` in the directory that
         holds the collections, and are only changed if `ask` gets a yes.
         Returns an empty string on success, or an error string on failure.
         """
         root: Path = self.items_directory.parent
-        paths: list[Path] = tag_references(root, old_tag)
+        paths: list[Path] = sorted(
+            {
+                path
+                for old_tag in tags
+                for path in tag_references(root, old_tag)
+            }
+        )
         if not paths:
             return ""
         print("The following `.md` files have tags that need to be renamed:")
@@ -2429,15 +2674,31 @@ class Items:
         except EOFError:
             answer = ""
         if answer.strip().casefold() not in ("y", "yes"):
-            print(f"Not updated; {old_tag} is still used in them")
+            print(
+                f"Not updated; {', '.join(tags)} "
+                f"{'is' if len(tags) == 1 else 'are'} still used in them"
+            )
             return ""
-        pattern: re.Pattern[str] = tag_pattern(old_tag)
+        # One pattern changes every tag at once, so that a new tag is never
+        # changed again as another's old tag.
+        pattern: re.Pattern[str] = re.compile(
+            "|".join(tag_pattern(old_tag).pattern for old_tag in tags)
+        )
         for path in paths:
             try:
-                write_file(path, pattern.sub(new_tag, read_file(path)))
+                write_file(
+                    path,
+                    pattern.sub(
+                        lambda found: tags[found.group(0)], read_file(path)
+                    ),
+                )
             except OSError as error:
                 return f"Unable to update '{path}': {error}"
-        print(f"Updated {old_tag} to {new_tag} in {len(paths)} files")
+        print(
+            "Updated "
+            + ", ".join(f"{old} to {new}" for old, new in tags.items())
+            + f" in {len(paths)} files"
+        )
         return ""
 
     def delete_command(
@@ -2668,6 +2929,8 @@ class Items:
                 error = items.priority_command(rest)
             case "move":
                 error = items.move_command(rest, ask)
+            case "transfer":
+                error = items.transfer_command(rest, collections, ask)
             case "show":
                 error = items.show_command(rest)
             case "type":
@@ -2768,6 +3031,227 @@ def write_startup(collections: list["Items"]) -> str:
     except OSError as error:
         return f"Unable to write '{startup_path}': {error}"
     return write_closed(startup.items_directory / "Closed.md", older)
+
+
+def do_transfer(directory: Path, plan: dict[str, object], phase: int) -> str:
+    """Do the transfer `plan` from the collection `directory`, from `phase`.
+
+    The plan names the target collection (a sibling of `directory`), the
+    time, the "items" (each with the `TRANSFER_KEYS`) and the renames of
+    the renumberings of the source and the target (as in
+    `.renumber.json`).  Phase 1 moves the item directories to temporary
+    names in the target, phase 2 renumbers the source, phase 3 renumbers
+    the target to make room, and phase 4 fixes each item's headings and
+    `.item.json` and gives it its new name.  Each step is skipped if it
+    has already been done, and `.transfer.json` in `directory` records the
+    plan and its phase until the end, when it is removed.  Returns an
+    empty string on success, or an error string on failure.
+    """
+    marker: Path = directory / TRANSFER_FILE
+    target: Path = directory.parent / str(plan["target"])
+    stamp: str = str(plan["time"])
+    items: list[dict[str, str]] = plan_list(plan, "items", TRANSFER_KEYS)
+    limit: str = os.environ.get(INTERRUPT_VARIABLE, "")
+    steps: list[int] = [0]
+
+    def step() -> None:
+        steps[0] += 1
+        if limit.isdecimal() and steps[0] > int(limit):
+            raise RenumberInterrupted
+
+    def save(next_phase: int) -> None:
+        write_file(
+            marker, json.dumps({**plan, "phase": next_phase}, indent=2) + "\n"
+        )
+
+    try:
+        save(phase)
+        if phase <= 1:
+            for item in items:
+                if (directory / item["old"]).exists() and not (
+                    target / item["temporary"]
+                ).exists():
+                    step()
+                    (directory / item["old"]).rename(
+                        target / item["temporary"]
+                    )
+            save(2)
+        for number, (renumbered, key) in enumerate(
+            ((directory, "source_renames"), (target, "target_renames")), 2
+        ):
+            if phase <= number:
+                renames: list[dict[str, str]] = plan_list(
+                    plan, key, RENAME_KEYS
+                )
+                if renames:
+                    step()
+                    error: str = do_renumber(renumbered, renames, 1)
+                    if error:
+                        return error
+                save(number + 1)
+        for item in items:
+            temporary: Path = target / item["temporary"]
+            if not temporary.exists():
+                continue
+            step()
+            details_path: Path = temporary / "Details.md"
+            details: str = read_file(details_path)
+            prefix: str = f"# {item['old_number']} "
+            if details.startswith(prefix):
+                write_file(
+                    details_path,
+                    f"# {item['new_number']} {details[len(prefix):]}",
+                )
+            if item["summary"]:
+                write_summary_heading(
+                    temporary, summary_heading(item["new_tag"], item["title"])
+                )
+            metadata: dict[str, object] = read_item(temporary)
+            move: dict[str, str] = {
+                "from": item["old_tag"],
+                "to": item["new_tag"],
+                "time": stamp,
+            }
+            moves: object = metadata.get("moves")
+            moves = moves if isinstance(moves, list) else []
+            if not moves or moves[-1] != move:
+                moves.append(move)
+            metadata.update(tag=item["tag"], updated=stamp, moves=moves)
+            write_item(temporary, metadata)
+            temporary.rename(target / item["new"])
+        marker.unlink()
+    except (OSError, ValueError) as error:
+        return (
+            f"Unable to transfer items from '{directory}' to '{target}': "
+            f"{error}"
+        )
+    return ""
+
+
+def plan_list(
+    plan: dict[str, object], key: str, keys: tuple[str, ...]
+) -> list[dict[str, str]]:
+    """Return the list `key` of `plan`, each entry with the `keys`.
+
+    Raises a `ValueError` if it is not a list of JSON objects with them.
+    """
+    entries: object = plan.get(key)
+    if not isinstance(entries, list) or not all(
+        isinstance(entry, dict) and all(name in entry for name in keys)
+        for entry in entries
+    ):
+        raise ValueError(f"'{key}' is not a list of {', '.join(keys)}")
+    return [{name: str(entry[name]) for name in keys} for entry in entries]
+
+
+def recover_transfers(parent: Path) -> None:
+    """Finish every interrupted transfer between the collections in `parent`.
+
+    This is done before any collection is loaded, since a collection in
+    the middle of a transfer can have gaps that must not be "fixed".  The
+    recovery, or a failure to recover, is reported to stderr.
+    """
+    try:
+        directories: list[Path] = sorted(parent.iterdir())
+    except OSError:
+        return
+    for directory in directories:
+        marker: Path = directory / TRANSFER_FILE
+        if not (directory / COLLECTION_FILE).is_file() or not marker.exists():
+            continue
+        error: str = ""
+        plan: dict[str, object] = {}
+        items: list[dict[str, str]] = []
+        try:
+            loaded: object = json.loads(read_file(marker))
+            if not isinstance(loaded, dict):
+                raise TypeError("it is not a JSON object")
+            plan = loaded
+            phase: int = int(str(plan["phase"]))
+            items = plan_list(plan, "items", TRANSFER_KEYS)
+        except (OSError, ValueError, TypeError, KeyError) as problem:
+            error = f"Unable to read '{marker}': {problem!r}"
+        else:
+            error = do_transfer(directory, plan, phase)
+        if error:
+            print(
+                f"Unable to finish an interrupted transfer: {error}",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"Finished an interrupted transfer from '{directory.name}' "
+                f"to '{plan['target']}': "
+                + ", ".join(
+                    f"{item['old_tag']} -> {item['new_tag']}" for item in items
+                ),
+                file=sys.stderr,
+            )
+
+
+def do_renumber(
+    directory: Path, renames: list[dict[str, str]], phase: int
+) -> str:
+    """Do the `renames` of a renumbering in `directory`, from `phase`.
+
+    Phase 1 renames the old directories to temporary names, phase 2
+    renames those to the new names, and phase 3 rewrites the headings.
+    Each step is skipped if it has already been done, and
+    `.renumber.json` records the phase until the end, when it is
+    removed.  Returns an empty string on success, or an error string
+    on failure.
+    """
+    marker: Path = directory / RENUMBER_FILE
+    limit: str = os.environ.get(INTERRUPT_VARIABLE, "")
+    steps: list[int] = [0]
+
+    def step() -> None:
+        steps[0] += 1
+        if limit.isdecimal() and steps[0] > int(limit):
+            raise RenumberInterrupted
+
+    def path(rename: dict[str, str], key: str) -> Path:
+        return directory / rename[key]
+
+    try:
+        write_file(
+            marker,
+            json.dumps({"phase": phase, "renames": renames}, indent=2)
+            + "\n",
+        )
+        if phase == 1:
+            for rename in renames:
+                if path(rename, "old").exists() and not path(
+                    rename, "temporary"
+                ).exists():
+                    step()
+                    path(rename, "old").rename(path(rename, "temporary"))
+            write_file(
+                marker,
+                json.dumps({"phase": 2, "renames": renames}, indent=2)
+                + "\n",
+            )
+        for rename in renames:
+            if path(rename, "temporary").exists():
+                step()
+                path(rename, "temporary").rename(path(rename, "new"))
+        for rename in renames:
+            details_path: Path = path(rename, "new") / "Details.md"
+            details: str = read_file(details_path)
+            prefix: str = f"# {rename['old_number']} "
+            if details.startswith(prefix):
+                step()
+                write_file(
+                    details_path,
+                    f"# {rename['new_number']} {details[len(prefix):]}",
+                )
+        marker.unlink()
+    except OSError as error:
+        return (
+            f"Unable to renumber items in '{directory}': "
+            f"{error}"
+        )
+    return ""
 
 
 def write_active_rules(collections: list["Items"]) -> str:

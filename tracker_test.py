@@ -89,6 +89,10 @@ def test() -> int:
         _test_types(check, Path(temporary))
     with tempfile.TemporaryDirectory() as temporary:
         _test_rules(check, Path(temporary))
+    with tempfile.TemporaryDirectory() as temporary:
+        _test_transfer(check, Path(temporary))
+    with tempfile.TemporaryDirectory() as temporary:
+        _test_transfer_recovery(check, Path(temporary))
     print(f"{len(checks)} checks, {len(failures)} failures")
     return 1 if failures else 0
 
@@ -1958,6 +1962,359 @@ def _test_rule_failures(
         and copy.is_file(),
         "set a source again after failures",
     )
+
+
+def _test_transfer(check: Check, directory: Path) -> None:
+    """Test `transfer`, which moves items between collections."""
+    answers: list[str] = []
+    run: Callable[..., tuple[int, str]] = _runner(answers)
+    original: Path = Path.cwd()
+    os.chdir(directory)
+    tasks: Path = directory / "TASKS"
+    issues: Path = directory / "ISSUES"
+    try:
+        for answer, arguments, code, text in (
+            ("y", ("TASKS", "create"), 0, "Created"),
+            ("y", ("ISSUES", "create"), 0, "Created"),
+            ("y", ("RULES", "create"), 0, "Created"),
+            ("", ("r", "type", "rules"), 0, ""),
+            ("", ("i", "enable", "priority"), 0, ""),
+            ("", ("t", "cr", "1", "First bug"), 0, ""),
+            ("", ("t", "cr", "1.1", "Child one"), 0, ""),
+            ("", ("t", "cr", "2", "Second"), 0, ""),
+            ("", ("t", "cr", "3", "Third"), 0, ""),
+            ("", ("i", "cr", "1", "Fix bad memory"), 0, ""),
+            ("", ("i", "cr", "2", "Something"), 0, ""),
+            ("", ("i", "pr", "2", "1"), 0, ""),
+            ("", ("t", "tr"), 1, "Usage"),
+            ("", ("t", "tr", "1"), 1, "Usage"),
+            ("", ("t", "tr", "1", "i", "x", "2"), 1, "Usage"),
+            ("", ("t", "tr", "x", "i"), 1, "Invalid"),
+            ("", ("t", "tr", "1", "x"), 1, "does not match one collection"),
+            ("", ("t", "tr", "1", "t"), 1, "their own collection; use move"),
+            ("", ("t", "tr", "1", "r"), 1, "(type items) to 'RULES' (type"),
+            ("", ("t", "tr", "9", "i"), 1, "does not exist"),
+            ("", ("t", "tr", "1", "i", "5"), 1, "next free number; that is 3"),
+            ("", ("t", "tr", "1", "i", "x.y"), 1, "Invalid"),
+            ("", ("t", "tr", "1", "i", "after", "I.x"), 1, "Invalid"),
+            ("n", ("t", "tr", "1", "i", "before", "2"), 1, "Not transferred"),
+            (
+                "y",
+                ("t", "tr", "T.fb", "i", "before", "I.s"),
+                0,
+                (
+                    "Transferred (old tag first):\n"
+                    "T.fb -> 2    Pending    -  I.fb  First bug\n"
+                    "T.co -> 2.1  Pending    -  I.co  Child one\n"
+                    "In TASKS:\nRenumbered (old number first):\n"
+                    "2 -> 1  Pending    T.s  Second\n"
+                    "3 -> 2  Pending    T.t  Third\n"
+                    "In ISSUES:\nRenumbered (old number first):\n"
+                    "2 -> 3  Pending    1  I.s  Something\n"
+                ),
+            ),
+            (
+                "y",
+                ("T.s", "transfer", "issues"),
+                0,
+                "T.s -> 4  Pending    -  I.s2  Second\n",
+            ),
+            ("y", ("i", "tr", "3", "t", "1"), 1, "Item '1' already exists"),
+            (
+                "y",
+                ("i", "tr", "3", "t", "after", "1"),
+                0,
+                "I.s -> 2  Pending    T.s  Something\n",
+            ),
+            (
+                "y",
+                ("i", "tr", "2-3", "t", "before", "T.t"),
+                0,
+                (
+                    "I.fb -> 1    Pending    T.fb  First bug\n"
+                    "I.co -> 1.1  Pending    T.co  Child one\n"
+                    "I.s2 -> 2    Pending    T.s2  Second\n"
+                ),
+            ),
+            ("", ("i", "ls"), 0, "1  Pending    -  I.fbm  Fix bad memory\n"),
+            (
+                "",
+                ("t", "ls"),
+                0,
+                (
+                    "3    Pending    T.t   Third\n"
+                    "4    Pending    T.s   Something\n"
+                ),
+            ),
+            (
+                "",
+                ("t", "sh", "T.fb"),
+                0,
+                "Transfers:\n  2",
+            ),
+            ("y", ("t", "tr", "T.s", "i"), 0, "T.s -> 2  Pending    1  I.s "),
+        ):
+            answers[:] = [answer] if answer else []
+            result: tuple[int, str] = run(*arguments)
+            check(
+                result[0] == code and text in result[1],
+                f"transfer command {' '.join(arguments)!r}",
+            )
+        moved: Path = tasks / "1_First_bug"
+        moves: object = read_item(moved)["moves"]
+        check(
+            read_file(moved / "Details.md") == "# 1 First bug\n"
+            and read_file(tasks / "1.1_Child_one" / "Details.md")
+            == "# 1.1 Child one\n"
+            and read_file(moved / "Summary.md")
+            == "# Summary of `T.fb` First bug\n"
+            and isinstance(moves, list)
+            and [move["to"] for move in moves] == ["I.fb", "T.fb"],
+            "a transfer fixes the headings and records the moves",
+        )
+        check(
+            read_file(tasks / "Startup.md").count("@../ISSUES/") == 2,
+            "Startup.md follows a transfer",
+        )
+        check(
+            isinstance(
+                Items(tasks).transfer_items([(9,)], Items(issues), "", "3"),
+                str,
+            ),
+            "transfer_items() checks the transfer",
+        )
+        _test_transfer_failures(check, run, answers, tasks, issues)
+    finally:
+        os.chdir(original)
+
+
+def _test_transfer_failures(
+    check: Check,
+    run: Callable[..., tuple[int, str]],
+    answers: list[str],
+    tasks: Path,
+    issues: Path,
+) -> None:
+    """Test `transfer` when files can not be read or written.
+
+    `run` runs a command next to the `tasks` collection (First bug and its
+    child, Second and Third) and the `issues` collection (Fix bad memory
+    and Something), and `answers` answers its questions.  An interrupted
+    transfer is finished by the next command.
+    """
+
+    def where(collection: Path, title: str) -> Path:
+        return next(collection.glob(f"*_{title}"))
+
+    bad: Path = tasks.parent / "Bad"
+    bad.mkdir()
+    write_file(bad / COLLECTION_FILE, "[]\n")
+    check(
+        "'Bad' can not be loaded" in run("t", "tr", "1", "b")[1],
+        "transfer to a collection that can not be loaded",
+    )
+    shutil.rmtree(bad)
+    marker: Path = tasks / ".transfer.json"
+    for text in ("[]", '{"phase": 1}', '{"phase": "x", "items": []}'):
+        write_file(marker, text)
+        check(
+            "Unable to finish an interrupted transfer: Unable to read"
+            in run("t", "ls")[1],
+            f"a transfer plan {text!r} that can not be read",
+        )
+    marker.unlink()
+    if os.geteuid() == 0:
+        # Permissions are not enforced for root.
+        return  # pragma: no cover
+    for collection, title, file_name, arguments, finished in (
+        (
+            issues,
+            "Something",
+            "Details.md",
+            ("T.fb", "i", "before", "I.s"),
+            "T.fb -> I.fb, T.co -> I.co",
+        ),
+        (tasks, "Second", ITEM_FILE, ("T.s2", "i"), "T.s2 -> I.s2"),
+        # Moving a directory to another one needs write access to it.
+        (tasks, "Third", "", ("T.t", "i"), "T.t -> I.t"),
+    ):
+        # The directories are found by title, since they are renumbered.
+        path: Path = where(collection, title) / file_name
+        path.chmod(0o500 if path.is_dir() else 0o400)
+        answers[:] = ["y"]
+        try:
+            code, output = run("t", "tr", *arguments)
+        finally:
+            # A renumbering may have moved the file before it failed.
+            for found in [path, *tasks.parent.rglob(path.name)]:
+                if found.exists():
+                    found.chmod(0o700 if found.is_dir() else 0o600)
+        check(
+            code == 1 and "Unable to" in output,
+            f"transfer {' '.join(arguments)} when {path.name} can not be "
+            "written",
+        )
+        code, output = run("i", "ls")
+        check(
+            code == 0
+            and "Finished an interrupted transfer from 'TASKS' to "
+            f"'ISSUES': {finished}\n" in output,
+            f"finish the transfer {' '.join(arguments)}",
+        )
+    check(
+        sorted(path.name for path in issues.glob("[0-9]*"))
+        == [
+            "1_Fix_bad_memory", "2.1_Child_one", "2_First_bug",
+            "3_Something", "4_Second", "5_Third",
+        ]
+        and not any(tasks.glob("[0-9]*")),
+        "finished transfers leave no gaps",
+    )
+    (issues / COLLECTION_FILE).chmod(0o400)
+    answers[:] = ["y"]
+    try:
+        code, output = run("i", "tr", "I.t", "t")
+    finally:
+        (issues / COLLECTION_FILE).chmod(0o600)
+    check(
+        code == 1 and "Unable to write" in output,
+        "a transfer whose time can not be saved",
+    )
+    notes: Path = tasks.parent / "notes.md"
+    write_file(notes, "Fix I.fb and its child I.co, not I.fbx.\n")
+    answers[:] = ["y", "y"]
+    code, output = run("i", "tr", "I.fb", "t")
+    check(
+        code == 0
+        and "have tags that need to be renamed:\n  notes.md\n" in output
+        and "Updated I.fb to T.fb, I.co to T.co in 1 files" in output
+        and read_file(notes) == "Fix T.fb and its child T.co, not I.fbx.\n",
+        "a transfer updates the references to every old tag",
+    )
+    answers[:] = ["n"]
+    code, output = run("t", "tr", "T.fb", "i")
+    check(
+        code == 0
+        and "Not updated; T.fb, T.co are still used in them" in output
+        and "T.fb" in read_file(notes),
+        "a transfer that does not update the references",
+    )
+
+
+def _test_transfer_recovery(check: Check, directory: Path) -> None:
+    """Test finishing a transfer interrupted after each of its steps.
+
+    Transferring TASKS item 1 before ISSUES item 2 renumbers both
+    collections; transferring TASKS item 3 (with its child) to the end of
+    ISSUES renumbers neither, so it can be interrupted between items.
+    """
+    for name, place, word, expected in (
+        (
+            (1,),
+            "before",
+            "2",
+            [
+                "ISSUES/1_Fix_bad_memory # 1 Fix bad memory I.fbm",
+                "ISSUES/2.1_Child_one # 2.1 Child one I.co",
+                "ISSUES/2_First_bug # 2 First bug I.fb",
+                "ISSUES/3_Something # 3 Something I.s",
+                "TASKS/1_Second # 1 Second T.s",
+                "TASKS/2_Third # 2 Third T.t",
+                "TASKS/2.1_Fourth # 2.1 Fourth T.f",
+            ],
+        ),
+        (
+            (3,),
+            "",
+            "3",
+            [
+                "ISSUES/1_Fix_bad_memory # 1 Fix bad memory I.fbm",
+                "ISSUES/2_Something # 2 Something I.s",
+                "ISSUES/3.1_Fourth # 3.1 Fourth I.f",
+                "ISSUES/3_Third # 3 Third I.t",
+                "TASKS/1.1_Child_one # 1.1 Child one T.co",
+                "TASKS/1_First_bug # 1 First bug T.fb",
+                "TASKS/2_Second # 2 Second T.s",
+            ],
+        ),
+    ):
+        _test_interrupted_transfer(
+            check,
+            directory / f"{name[0]}",
+            name,
+            place,
+            word,
+            sorted(expected),
+        )
+    if os.geteuid() == 0:
+        # Permissions are not enforced for root.
+        return  # pragma: no cover
+    parent: Path = directory / "1" / "0"
+    parent.chmod(0o300)
+    try:
+        check(
+            not Items(parent / "TASKS").error,
+            "load a collection whose parent can not be listed",
+        )
+    finally:
+        parent.chmod(0o700)
+
+
+def _test_interrupted_transfer(
+    check: Check,
+    directory: Path,
+    name: tuple[int, ...],
+    place: str,
+    word: str,
+    expected: list[str],
+) -> None:
+    """Interrupt a transfer of TASKS item `name` after each step.
+
+    The transfer goes `place` `word` in ISSUES, and each time the next
+    load must finish it, giving the `expected` items.
+    """
+    directory.mkdir()
+    for limit in range(100):
+        root: Path = directory / str(limit)
+        root.mkdir()
+        tasks: Items = Items(root / "TASKS")
+        issues: Items = Items(root / "ISSUES")
+        for collection, number, title in (
+            (tasks, "1", "First bug"), (tasks, "1.1", "Child one"),
+            (tasks, "2", "Second"), (tasks, "3", "Third"),
+            (tasks, "3.1", "Fourth"),
+            (issues, "1", "Fix bad memory"), (issues, "2", "Something"),
+        ):
+            collection.create_item(number, title)
+        os.environ[INTERRUPT_VARIABLE] = str(limit)
+        interrupted: bool = False
+        try:
+            tasks.transfer_items([name], issues, place, word)
+        except RenumberInterrupted:
+            interrupted = True
+        finally:
+            del os.environ[INTERRUPT_VARIABLE]
+        errors: io.StringIO = io.StringIO()
+        with contextlib.redirect_stderr(errors):
+            Items(root / "TASKS")
+        tree: list[str] = sorted(
+            f"{path.parent.name}/{path.name} "
+            f"{read_file(path / 'Details.md').strip()} "
+            f"{path.parent.name[0]}.{read_item(path)['tag']}"
+            for path in root.glob("*/[0-9]*")
+        )
+        check(
+            tree == expected
+            and not any(root.glob("*/.*_[0-9]*"))
+            and not any(root.glob("*/.transfer.json"))
+            and not any(root.glob("*/.renumber.json"))
+            and ("Finished an interrupted transfer" in errors.getvalue())
+            == interrupted,
+            f"finish a transfer of {name} interrupted after {limit} steps",
+        )
+        if not interrupted:
+            break
+    check(limit > 3, f"a transfer of {name} has several steps")
 
 
 def _test_errors(check: Check, directory: Path) -> None:
