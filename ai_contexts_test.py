@@ -58,13 +58,23 @@ Check = Callable[[bool, str], None]
 def test() -> int:
     """Test ai_contexts in a temporary directory.
 
-    Prints any failed checks and a summary.  Returns 0 if every check
-    passes and 1 otherwise.
+    Prints any failed checks and a summary.
+
+    Returns:
+    * (`int`): 0 if every check passes and 1 otherwise.
     """
     failures: list[str] = []
     checks: list[str] = []
 
     def check(condition: bool, description: str) -> None:
+        """Record a check, and print it if it failed.
+
+        Arguments:
+        * `condition` (`bool`):
+          The condition, which should be true.
+        * `description` (`str`):
+          What is checked.
+        """
         checks.append(description)
         if not condition:  # pragma: no cover
             failures.append(description)
@@ -104,7 +114,13 @@ def test() -> int:
 
 # Function `_test_parsing()`:
 def _test_parsing(check: Check) -> None:
-    """Test `parse_number()` and `Item` validation."""
+    """Test `parse_number()` and `Item` validation.
+
+    Arguments:
+    * `check` (`Check`):
+      Records a check: a condition that should be true and its
+      description.
+    """
     check(parse_number("1.2.3") == (1, 2, 3), "parse 1.2.3")
     check(parse_number("01.2") == (1, 2), "parse 01.2")
     for number in ("", "0", "-1", "1..2", "1.2.", "a.b", "1.0"):
@@ -218,7 +234,15 @@ def _test_parsing(check: Check) -> None:
 
 # Function `_test_items()`:
 def _test_items(check: Check, directory: Path) -> None:
-    """Test creating, listing and changing the state of items."""
+    """Test creating, listing and changing the state of items.
+
+    Arguments:
+    * `check` (`Check`):
+      Records a check: a condition that should be true and its
+      description.
+    * `directory` (`Path`):
+      The directory to test in.
+    """
     items: Items = Items(directory)
     check(
         not items.error
@@ -304,9 +328,28 @@ def _test_items(check: Check, directory: Path) -> None:
 
 # Function `_test_list_and_state()`:
 def _test_list_and_state(check: Check, items: Items, directory: Path) -> None:
-    """Test `list_items()`, `set_state()` and `write_startup()`."""
+    """Test `list_items()`, `set_state()` and `write_startup()`.
+
+    Arguments:
+    * `check` (`Check`):
+      Records a check: a condition that should be true and its
+      description.
+    * `items` (`Items`):
+      The collection to test.
+    * `directory` (`Path`):
+      The directory to test in.
+    """
 
     def numbers(listed: list[Item] | str) -> list[str]:
+        """Return the numbers of listed items.
+
+        Arguments:
+        * `listed` (`list[Item] | str`):
+          The items, or an error string.
+
+        Returns:
+        * (`list[str]`): The item numbers, or the error string alone.
+        """
         if isinstance(listed, str):  # pragma: no cover
             return [listed]
         return [item.number for item in listed]
@@ -380,7 +423,15 @@ def _test_list_and_state(check: Check, items: Items, directory: Path) -> None:
 
 # Function `_test_reload()`:
 def _test_reload(check: Check, directory: Path) -> None:
-    """Test loading items back from disk, including bad directories."""
+    """Test loading items back from disk, including bad directories.
+
+    Arguments:
+    * `check` (`Check`):
+      Records a check: a condition that should be true and its
+      description.
+    * `directory` (`Path`):
+      The directory to test in.
+    """
     (directory / "junk").mkdir()
     bad_state: Path = directory / "5_Bad_state"
     bad_state.mkdir()
@@ -451,7 +502,15 @@ def _test_reload(check: Check, directory: Path) -> None:
 
 # Function `_test_rename_delete()`:
 def _test_rename_delete(check: Check, directory: Path) -> None:
-    """Test `rename_item()` and `delete_items()`."""
+    """Test `rename_item()` and `delete_items()`.
+
+    Arguments:
+    * `check` (`Check`):
+      Records a check: a condition that should be true and its
+      description.
+    * `directory` (`Path`):
+      The directory to test in.
+    """
     items: Items = Items(directory)
     for number, title in (("1", "One"), ("1.1", "Child"), ("2", "Two")):
         items.create_item(number, title)
@@ -532,6 +591,15 @@ def _test_rename_delete(check: Check, directory: Path) -> None:
     questions: list[str] = []
 
     def yes(question: str) -> str:
+        """Answer yes to a question.
+
+        Arguments:
+        * `question` (`str`):
+          The question, which is recorded.
+
+        Returns:
+        * (`str`): "y".
+        """
         questions.append(question)
         return "y"
 
@@ -586,7 +654,15 @@ def _test_rename_delete(check: Check, directory: Path) -> None:
 
 # Function `_test_numbering()`:
 def _test_numbering(check: Check, directory: Path) -> None:
-    """Test numeric order, ranges, renumbering and fixing gaps."""
+    """Test numeric order, ranges, renumbering and fixing gaps.
+
+    Arguments:
+    * `check` (`Check`):
+      Records a check: a condition that should be true and its
+      description.
+    * `directory` (`Path`):
+      The directory to test in.
+    """
     items: Items = Items(directory)
     for part in range(1, 12):
         items.create_item(str(part), f"Top {part}")
@@ -607,6 +683,11 @@ def _test_numbering(check: Check, directory: Path) -> None:
         items.create_item(number, title)
 
     def tree() -> list[str]:
+        """Return item 1 and its descendants, reloaded from disk.
+
+        Returns:
+        * (`list[str]`): The number and title of each item.
+        """
         return [
             f"{item.number} {item.title}"
             for item in Items(directory).list_items((1,))
@@ -688,7 +769,15 @@ def _test_numbering(check: Check, directory: Path) -> None:
 
 # Function `_test_moving()`:
 def _test_moving(check: Check, directory: Path) -> None:
-    """Test creating at a place and moving."""
+    """Test creating at a place and moving.
+
+    Arguments:
+    * `check` (`Check`):
+      Records a check: a condition that should be true and its
+      description.
+    * `directory` (`Path`):
+      The directory to test in.
+    """
     items: Items = Items(directory)
     for number, title in (
         ("1", "A"),
@@ -700,6 +789,11 @@ def _test_moving(check: Check, directory: Path) -> None:
         items.create_item(number, title)
 
     def tree() -> str:
+        """Return every item, reloaded from disk.
+
+        Returns:
+        * (`str`): The number and title of each item, joined by spaces.
+        """
         return " ".join(
             f"{item.number}{item.title}"
             for item in Items(directory).list_items()
@@ -768,7 +862,15 @@ def _test_moving(check: Check, directory: Path) -> None:
 
 # Function `_test_recovery()`:
 def _test_recovery(check: Check, directory: Path) -> None:
-    """Test finishing a renumbering interrupted after every step."""
+    """Test finishing a renumbering interrupted after every step.
+
+    Arguments:
+    * `check` (`Check`):
+      Records a check: a condition that should be true and its
+      description.
+    * `directory` (`Path`):
+      The directory to test in.
+    """
     directory.mkdir()
     interruptions: int = 0
     for limit in range(12):
@@ -826,7 +928,15 @@ def _test_recovery(check: Check, directory: Path) -> None:
 
 # Function `_test_references()`:
 def _test_references(check: Check, directory: Path) -> None:
-    """Test finding and updating references to a renamed tag."""
+    """Test finding and updating references to a renamed tag.
+
+    Arguments:
+    * `check` (`Check`):
+      Records a check: a condition that should be true and its
+      description.
+    * `directory` (`Path`):
+      The directory to test in.
+    """
     directory.mkdir()
     items: Items = Items(directory / "TASKS")
     items.create_item("1", "Fix Big Mistake")
@@ -844,12 +954,33 @@ def _test_references(check: Check, directory: Path) -> None:
     answers: list[str] = []
 
     def ask(question: str) -> str:
+        """Answer a question with the next of the answers.
+
+        Arguments:
+        * `question` (`str`):
+          The question, which is recorded.
+
+        Returns:
+        * (`str`): The next answer.
+
+        Raises:
+        * `EOFError`: If there are no answers left.
+        """
         questions.append(question)
         if not answers:
             raise EOFError
         return answers.pop(0)
 
     def rename(*words: str) -> str:
+        """Rename item 1.
+
+        Arguments:
+        * `words` (`str`):
+          The words of the new title.
+
+        Returns:
+        * (`str`): The error string and everything printed.
+        """
         output: io.StringIO = io.StringIO()
         with (
             contextlib.redirect_stdout(output),
@@ -897,6 +1028,15 @@ def _test_references(check: Check, directory: Path) -> None:
     (directory / "sub" / "deep.md").chmod(0o644)
 
     def refuse_writes(question: str) -> str:
+        """Make `notes.md` read-only, then answer yes.
+
+        Arguments:
+        * `question` (`str`):
+          The question.
+
+        Returns:
+        * (`str`): "y".
+        """
         (directory / "notes.md").chmod(0o444)
         return "y"
 
@@ -911,7 +1051,15 @@ def _test_references(check: Check, directory: Path) -> None:
 
 # Function `_test_closed()`:
 def _test_closed(check: Check, directory: Path) -> None:
-    """Test `Summary.md`, `Closed.md` and Closed items in `Startup.md`."""
+    """Test `Summary.md`, `Closed.md` and Closed items in `Startup.md`.
+
+    Arguments:
+    * `check` (`Check`):
+      Records a check: a condition that should be true and its
+      description.
+    * `directory` (`Path`):
+      The directory to test in.
+    """
     directory.mkdir()
     tasks: Items = Items(directory / "TASKS")
     issues: Items = Items(directory / "ISSUES")
@@ -1054,13 +1202,27 @@ def _test_closed(check: Check, directory: Path) -> None:
 
 # Function `_test_checks()`:
 def _test_checks(check: Check, directory: Path) -> None:
-    """Test the checks made each time a collection is loaded."""
+    """Test the checks made each time a collection is loaded.
+
+    Arguments:
+    * `check` (`Check`):
+      Records a check: a condition that should be true and its
+      description.
+    * `directory` (`Path`):
+      The directory to test in.
+    """
     directory.mkdir()
     items: Items = Items(directory / "TASKS")
     for number, title in (("1", "A"), ("2", "B"), ("3", "C")):
         items.create_item(number, title)
 
     def load() -> tuple[Items, str]:
+        """Load the TASKS collection.
+
+        Returns:
+        * (`tuple[Items, str]`): The collection and the messages printed
+          to stderr.
+        """
         errors: io.StringIO = io.StringIO()
         with contextlib.redirect_stderr(errors):
             loaded: Items = Items(directory / "TASKS")
@@ -1125,13 +1287,30 @@ def _test_checks(check: Check, directory: Path) -> None:
 
 # Function `_test_write_failures()`:
 def _test_write_failures(check: Check, directory: Path) -> None:
-    """Test failing to write while renumbering or noting the time."""
+    """Test failing to write while renumbering or noting the time.
+
+    Arguments:
+    * `check` (`Check`):
+      Records a check: a condition that should be true and its
+      description.
+    * `directory` (`Path`):
+      The directory to test in.
+    """
     if os.geteuid() == 0:
         # Permissions are not enforced for root.
         return  # pragma: no cover
     directory.mkdir()
 
     def collection(name: str) -> Items:
+        """Make a collection with two items.
+
+        Arguments:
+        * `name` (`str`):
+          The name of the collection.
+
+        Returns:
+        * (`Items`): The collection.
+        """
         items: Items = Items(directory / name)
         items.create_item("1", "A")
         items.create_item("2", "B")
@@ -1156,6 +1335,15 @@ def _test_write_failures(check: Check, directory: Path) -> None:
     (directory / "commands" / "1_Taken").mkdir()
 
     def yes(_: str) -> str:
+        """Answer yes to a question.
+
+        Arguments:
+        * `_` (`str`):
+          The question, which is ignored.
+
+        Returns:
+        * (`str`): "y".
+        """
         return "y"
 
     with (
@@ -1200,9 +1388,15 @@ def _test_snapshot_reminder(
 ) -> None:
     """Test the reminder to snapshot before a move or rename.
 
-    `run` runs a command in a directory with a TASKS collection whose
-    item 1 has one child, and returns its exit code and output.  The
-    `answers` are given to its questions in turn.
+    Arguments:
+    * `check` (`Check`):
+      Records a check: a condition that should be true and its
+      description.
+    * `run` (`Callable[..., tuple[int, str]]`):
+      Runs a command in a directory with a TASKS collection whose item 1
+      has one child, and returns its exit code and output.
+    * `answers` (`list[str]`):
+      The answers to the questions, in turn.
     """
     saved: str | None = os.environ.pop(DELAY_VARIABLE, None)
     try:
@@ -1269,17 +1463,46 @@ def _test_snapshot_reminder(
 
 # Function `_test_commands()`:
 def _test_commands(check: Check, directory: Path) -> None:
-    """Test `run_command()` from inside `directory`."""
+    """Test `run_command()` from inside a directory.
+
+    Arguments:
+    * `check` (`Check`):
+      Records a check: a condition that should be true and its
+      description.
+    * `directory` (`Path`):
+      The directory to test in.
+    """
     answers: list[str] = []
     questions: list[str] = []
 
     def ask(question: str) -> str:
+        """Answer a question with the next of the answers.
+
+        Arguments:
+        * `question` (`str`):
+          The question, which is recorded.
+
+        Returns:
+        * (`str`): The next answer.
+
+        Raises:
+        * `EOFError`: If there are no answers left.
+        """
         questions.append(question)
         if not answers:
             raise EOFError
         return answers.pop(0)
 
     def run(*arguments: str) -> tuple[int, str]:
+        """Run an ai_contexts command.
+
+        Arguments:
+        * `arguments` (`str`):
+          The command line arguments.
+
+        Returns:
+        * (`tuple[int, str]`): The exit code and everything printed.
+        """
         output: io.StringIO = io.StringIO()
         with (
             contextlib.redirect_stdout(output),
@@ -1556,16 +1779,43 @@ def _test_commands(check: Check, directory: Path) -> None:
 def _runner(answers: list[str]) -> Callable[..., tuple[int, str]]:
     """Return a function that runs an ai_contexts command.
 
-    It returns the exit code and everything printed.  Each question is
-    answered with the next of `answers`, or EOF if there are none.
+    Arguments:
+    * `answers` (`list[str]`):
+      The answers to the command's questions, in turn; a question with
+      no answer left gets EOF.
+
+    Returns:
+    * (`Callable[..., tuple[int, str]]`): The function, which returns
+      the exit code and everything printed.
     """
 
     def ask(_: str) -> str:
+        """Answer a question with the next of the answers.
+
+        Arguments:
+        * `_` (`str`):
+          The question, which is ignored.
+
+        Returns:
+        * (`str`): The next answer.
+
+        Raises:
+        * `EOFError`: If there are no answers left.
+        """
         if not answers:
             raise EOFError
         return answers.pop(0)
 
     def run(*arguments: str) -> tuple[int, str]:
+        """Run an ai_contexts command.
+
+        Arguments:
+        * `arguments` (`str`):
+          The command line arguments.
+
+        Returns:
+        * (`tuple[int, str]`): The exit code and everything printed.
+        """
         output: io.StringIO = io.StringIO()
         with (
             contextlib.redirect_stdout(output),
@@ -1579,7 +1829,15 @@ def _runner(answers: list[str]) -> Callable[..., tuple[int, str]]:
 
 # Function `_test_types()`:
 def _test_types(check: Check, directory: Path) -> None:
-    """Test collection types, and a rules collection, from `directory`."""
+    """Test collection types, and a rules collection.
+
+    Arguments:
+    * `check` (`Check`):
+      Records a check: a condition that should be true and its
+      description.
+    * `directory` (`Path`):
+      The directory to test in.
+    """
     answers: list[str] = []
     run: Callable[..., tuple[int, str]] = _runner(answers)
     original: Path = Path.cwd()
@@ -1708,6 +1966,13 @@ def _test_rules(check: Check, directory: Path) -> None:
 
     The collections are in `directory/project` and the sources in
     `directory/shared`.
+
+    Arguments:
+    * `check` (`Check`):
+      Records a check: a condition that should be true and its
+      description.
+    * `directory` (`Path`):
+      The directory to test in.
     """
     answers: list[str] = []
     run: Callable[..., tuple[int, str]] = _runner(answers)
@@ -1959,9 +2224,17 @@ def _test_rules(check: Check, directory: Path) -> None:
 def _test_rule_failures(
     check: Check, run: Callable[..., tuple[int, str]], rules: Path
 ) -> None:
-    """Test the rules in `rules` when files can not be read or written.
+    """Test rules when files can not be read or written.
 
-    `run` runs a command in the project; rule 2 (`R.ar`) has a source.
+    Arguments:
+    * `check` (`Check`):
+      Records a check: a condition that should be true and its
+      description.
+    * `run` (`Callable[..., tuple[int, str]]`):
+      Runs a command in the project, and returns its exit code and
+      output.
+    * `rules` (`Path`):
+      The rules collection; rule 2 (`R.ar`) has a source.
     """
     active: Path = rules / "Active_Rules.md"
     active.unlink()
@@ -2012,7 +2285,15 @@ def _test_rule_failures(
 
 # Function `_test_transfer()`:
 def _test_transfer(check: Check, directory: Path) -> None:
-    """Test `transfer`, which moves items between collections."""
+    """Test `transfer`, which moves items between collections.
+
+    Arguments:
+    * `check` (`Check`):
+      Records a check: a condition that should be true and its
+      description.
+    * `directory` (`Path`):
+      The directory to test in.
+    """
     answers: list[str] = []
     run: Callable[..., tuple[int, str]] = _runner(answers)
     original: Path = Path.cwd()
@@ -2145,13 +2426,35 @@ def _test_transfer_failures(
 ) -> None:
     """Test `transfer` when files can not be read or written.
 
-    `run` runs a command next to the `tasks` collection (First bug and its
-    child, Second and Third) and the `issues` collection (Fix bad memory
-    and Something), and `answers` answers its questions.  An interrupted
-    transfer is finished by the next command.
+    An interrupted transfer is finished by the next command.
+
+    Arguments:
+    * `check` (`Check`):
+      Records a check: a condition that should be true and its
+      description.
+    * `run` (`Callable[..., tuple[int, str]]`):
+      Runs a command next to the collections, and returns its exit code
+      and output.
+    * `answers` (`list[str]`):
+      The answers to the questions, in turn.
+    * `tasks` (`Path`):
+      The TASKS collection (First bug and its child, Second and Third).
+    * `issues` (`Path`):
+      The ISSUES collection (Fix bad memory and Something).
     """
 
     def where(collection: Path, title: str) -> Path:
+        """Return the directory of an item, by its title.
+
+        Arguments:
+        * `collection` (`Path`):
+          The collection.
+        * `title` (`str`):
+          The item's title, as in its directory name.
+
+        Returns:
+        * (`Path`): The item's directory.
+        """
         return next(collection.glob(f"*_{title}"))
 
     bad: Path = tasks.parent / "Bad"
@@ -2259,8 +2562,15 @@ def _test_transfer_recovery(check: Check, directory: Path) -> None:
     """Test finishing a transfer interrupted after each of its steps.
 
     Transferring TASKS item 1 before ISSUES item 2 renumbers both
-    collections; transferring TASKS item 3 (with its child) to the end of
-    ISSUES renumbers neither, so it can be interrupted between items.
+    collections; transferring TASKS item 3 (with its child) to the end
+    of ISSUES renumbers neither, so it can be interrupted between items.
+
+    Arguments:
+    * `check` (`Check`):
+      Records a check: a condition that should be true and its
+      description.
+    * `directory` (`Path`):
+      The directory to test in.
     """
     for name, place, word, expected in (
         (
@@ -2323,10 +2633,24 @@ def _test_interrupted_transfer(
     word: str,
     expected: list[str],
 ) -> None:
-    """Interrupt a transfer of TASKS item `name` after each step.
+    """Interrupt a transfer of a TASKS item after each step.
 
-    The transfer goes `place` `word` in ISSUES, and each time the next
-    load must finish it, giving the `expected` items.
+    Each time, the next load must finish the transfer.
+
+    Arguments:
+    * `check` (`Check`):
+      Records a check: a condition that should be true and its
+      description.
+    * `directory` (`Path`):
+      The directory to test in.
+    * `name` (`tuple[int, ...]`):
+      The name of the TASKS item to transfer.
+    * `place` (`str`):
+      "", "before" or "after".
+    * `word` (`str`):
+      The number of the place in ISSUES.
+    * `expected` (`list[str]`):
+      The ISSUES items after the transfer.
     """
     directory.mkdir()
     for limit in range(100):
@@ -2377,7 +2701,15 @@ def _test_interrupted_transfer(
 
 # Function `_test_errors()`:
 def _test_errors(check: Check, directory: Path) -> None:
-    """Test the error paths for files that can not be read or written."""
+    """Test the error paths for files that can not be read or written.
+
+    Arguments:
+    * `check` (`Check`):
+      Records a check: a condition that should be true and its
+      description.
+    * `directory` (`Path`):
+      The directory to test in.
+    """
     directory.mkdir()
     items: Items = Items(directory / "TASKS")
     items.create_item("1", "One")
@@ -2466,7 +2798,15 @@ def _test_errors(check: Check, directory: Path) -> None:
 
 # Function `_test_old_collection_file()`:
 def _test_old_collection_file(check: Check, directory: Path) -> None:
-    """Test the migration of `.tracker.json` to `.ai_contexts.json`."""
+    """Test the migration of `.tracker.json` to `.ai_contexts.json`.
+
+    Arguments:
+    * `check` (`Check`):
+      Records a check: a condition that should be true and its
+      description.
+    * `directory` (`Path`):
+      The directory to test in.
+    """
     for name in ("TASKS", "ISSUES", "plain"):
         (directory / name).mkdir()
     write_file(directory / "TASKS" / OLD_COLLECTION_FILE, '{"a": 1}\n')

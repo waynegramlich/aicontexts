@@ -390,21 +390,51 @@ class RenumberInterrupted(Exception):
 
 # Function `read_file()`:
 def read_file(path: Path) -> str:
-    """Return the contents of the UTF-8 text file at `path`."""
+    """Return the contents of a UTF-8 text file.
+
+    Arguments:
+    * `path` (`Path`):
+      The file to read.
+
+    Returns:
+    * (`str`): The contents of the file.
+
+    Raises:
+    * `OSError`: If the file can not be read.
+    """
     return path.read_text(encoding="utf-8")
 
 
 # Function `write_file()`:
 def write_file(path: Path, text: str) -> None:
-    """Write `text` to `path` as a UTF-8 text file."""
+    """Write a UTF-8 text file.
+
+    Arguments:
+    * `path` (`Path`):
+      The file to write.
+    * `text` (`str`):
+      The new contents of the file.
+
+    Raises:
+    * `OSError`: If the file can not be written.
+    """
     path.write_text(text, encoding="utf-8")
 
 
 # Function `new_metadata()`:
 def new_metadata(state: str, stamp: str) -> dict[str, object]:
-    """Return the metadata of a new item in `state` at time `stamp`.
+    """Return the metadata of a new item.
 
     The "history" list records every state change with its time.
+
+    Arguments:
+    * `state` (`str`):
+      The state of the new item.
+    * `stamp` (`str`):
+      The UTC timestamp of its creation.
+
+    Returns:
+    * (`dict[str, object]`): The metadata for its `.item.json`.
     """
     return {
         "state": state,
@@ -416,26 +446,48 @@ def new_metadata(state: str, stamp: str) -> dict[str, object]:
 
 # Function `write_item()`:
 def write_item(item_directory: Path, metadata: dict[str, object]) -> None:
-    """Write the `metadata` into the `.item.json` of `item_directory`."""
+    """Write the metadata of an item into its `.item.json`.
+
+    Arguments:
+    * `item_directory` (`Path`):
+      The item's directory.
+    * `metadata` (`dict[str, object]`):
+      The metadata to write.
+
+    Raises:
+    * `OSError`: If `.item.json` can not be written.
+    """
     text: str = json.dumps(metadata, indent=2)
     write_file(item_directory / ITEM_FILE, f"{text}\n")
 
 
 # Function `utc_stamp()`:
 def utc_stamp(seconds: float) -> str:
-    """Return `seconds` since the epoch as a UTC timestamp string.
+    """Return a time as a UTC timestamp string.
 
     The timestamp is ISO 8601, like "2026-10-05T21:35:00Z".
+
+    Arguments:
+    * `seconds` (`float`):
+      The time, in seconds since the epoch.
+
+    Returns:
+    * (`str`): The UTC timestamp.
     """
     return datetime.fromtimestamp(seconds, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 # Function `local_time()`:
 def local_time(stamp: str) -> str:
-    """Return the UTC timestamp `stamp` in the local time zone.
+    """Return a UTC timestamp in the local time zone.
 
-    Returns "-" if `stamp` is empty, or "?" if it is not a valid timestamp
-    with a time zone.
+    Arguments:
+    * `stamp` (`str`):
+      The UTC timestamp, which may be empty.
+
+    Returns:
+    * (`str`): The local time, "-" if `stamp` is empty, or "?" if it is
+      not a valid timestamp with a time zone.
     """
     if not stamp:
         return "-"
@@ -450,12 +502,22 @@ def local_time(stamp: str) -> str:
 
 # Function `read_item()`:
 def read_item(item_directory: Path) -> dict[str, object]:
-    """Return the metadata in the `.item.json` of `item_directory`.
+    """Return the metadata in the `.item.json` of an item.
 
-    An item directory in the old format, with a `.status` file instead, is
-    migrated first, using the time of the `.status` file as the created
-    and updated times.  Raises an `OSError` if a file can not be read or
-    written, or a `ValueError` if `.item.json` is not a JSON object.
+    An item directory in the old format, with a `.status` file instead,
+    is migrated first, using the time of the `.status` file as the
+    created and updated times.
+
+    Arguments:
+    * `item_directory` (`Path`):
+      The item's directory.
+
+    Returns:
+    * (`dict[str, object]`): The item's metadata.
+
+    Raises:
+    * `OSError`: If a file can not be read or written.
+    * `ValueError`: If `.item.json` is not a JSON object.
     """
     item_path: Path = item_directory / ITEM_FILE
     old_path: Path = item_directory / OLD_STATUS_FILE
@@ -480,13 +542,25 @@ def update_item(
     state: str = "",
     fields: dict[str, object] | None = None,
 ) -> str:
-    """Set the updated time in the `.item.json` of `item_directory` to now.
+    """Set the updated time in the `.item.json` of an item to now.
 
-    If `state` is given, the state is changed too, and the change is
-    appended to the "history" list.  The `fields` are also set, and a
-    field set to None is removed.  Any other metadata is kept.  Returns
-    the new updated time.  Raises an `OSError` or a `ValueError` like
-    `read_item()`.
+    Any other metadata is kept.
+
+    Arguments:
+    * `item_directory` (`Path`):
+      The item's directory.
+    * `state` (`str`):
+      The new state, which is also appended to the "history" list, or
+      "" to leave the state alone.
+    * `fields` (`dict[str, object] | None`):
+      Other fields to set; a field set to `None` is removed.
+
+    Returns:
+    * (`str`): The new updated time.
+
+    Raises:
+    * `OSError`: If `.item.json` can not be read or written.
+    * `ValueError`: If `.item.json` is not a JSON object.
     """
     metadata: dict[str, object] = read_item(item_directory)
     stamp: str = utc_stamp(time.time())
@@ -509,10 +583,19 @@ def update_item(
 
 # Function `matches()`:
 def matches(word: str, names: Iterable[str]) -> list[str]:
-    """Return the `names` that `word` abbreviates, ignoring case.
+    """Return the names that a word abbreviates, ignoring case.
 
     A name equal to `word` (ignoring case) is the only match.  Otherwise
     every name that starts with `word` matches.
+
+    Arguments:
+    * `word` (`str`):
+      The word, which may be an abbreviation.
+    * `names` (`Iterable[str]`):
+      The names to match.
+
+    Returns:
+    * (`list[str]`): The matching names, in the order of `names`.
     """
     folded: str = word.casefold()
     exact: list[str] = [name for name in names if name.casefold() == folded]
@@ -523,13 +606,20 @@ def matches(word: str, names: Iterable[str]) -> list[str]:
 
 # Function `find_collections()`:
 def find_collections(start: Path) -> list[Path]:
-    """Return the collection directories nearest to `start`, sorted.
+    """Return the collection directories nearest to a directory.
 
     `start` and then each of its parents is searched for sub-directories
-    that contain a `.ai_contexts.json` file.  The ones in the first
-    directory that has any are returned, or an empty list if none are
-    found.  A collection in the old format, with a `.tracker.json` file
-    instead, is migrated by renaming that file.
+    that contain a `.ai_contexts.json` file.  A collection in the old
+    format, with a `.tracker.json` file instead, is migrated by renaming
+    that file.
+
+    Arguments:
+    * `start` (`Path`):
+      The directory to start searching from.
+
+    Returns:
+    * (`list[Path]`): The collections in the first directory that has
+      any, or an empty list if none are found.
     """
     for directory in (start, *start.parents):
         try:
@@ -559,10 +649,16 @@ def find_collections(start: Path) -> list[Path]:
 
 # Function `type_name()`:
 def type_name(directory: Path) -> str:
-    """Return the type of the collection `directory`, from `.ai_contexts.json`.
+    """Return the type of a collection, from its `.ai_contexts.json`.
 
-    Returns `DEFAULT_TYPE` if the file can not be read or has no type; an
-    unknown type is returned as it is (`Items` reports it).
+    Arguments:
+    * `directory` (`Path`):
+      The collection's directory.
+
+    Returns:
+    * (`str`): The type, or `DEFAULT_TYPE` if the file can not be read
+      or has no type.  An unknown type is returned as it is (`Items`
+      reports it).
     """
     try:
         settings: object = json.loads(read_file(directory / COLLECTION_FILE))
@@ -575,9 +671,15 @@ def type_name(directory: Path) -> str:
 
 # Function `commands()`:
 def commands(name: str = "") -> dict[str, str]:
-    """Return the commands of collection type `name`, or of every type.
+    """Return the commands of a collection type, or of every type.
 
-    Each command is mapped to the command that it runs.
+    Arguments:
+    * `name` (`str`):
+      The name of the collection type, or "" for every type.
+
+    Returns:
+    * (`dict[str, str]`): Each command, mapped to the command that it
+      runs.
     """
     type_commands: Iterable[str] = (
         [*TYPES[name].state_commands, *TYPES[name].commands]
@@ -589,19 +691,35 @@ def commands(name: str = "") -> dict[str, str]:
 
 # Function `sha256_of()`:
 def sha256_of(path: Path) -> str:
-    """Return the SHA-256 of the file at `path`, in hexadecimal.
+    """Return the SHA-256 of a file.
 
-    Raises an `OSError` if the file can not be read.
+    Arguments:
+    * `path` (`Path`):
+      The file.
+
+    Returns:
+    * (`str`): The SHA-256, in hexadecimal.
+
+    Raises:
+    * `OSError`: If the file can not be read.
     """
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 # Function `markdown_imports()`:
 def markdown_imports(text: str) -> list[tuple[int, str]]:
-    """Return the line number and path of each `@` import in `text`.
+    """Return each `@` import in Markdown text.
 
     Imports in fenced code blocks and in code spans are left out, since
     Claude Code does not follow them.
+
+    Arguments:
+    * `text` (`str`):
+      The Markdown text.
+
+    Returns:
+    * (`list[tuple[int, str]]`): The line number and path of each
+      import.
     """
     found: list[tuple[int, str]] = []
     fence: str = ""
@@ -623,11 +741,18 @@ def markdown_imports(text: str) -> list[tuple[int, str]]:
 
 # Function `expand_files()`:
 def expand_files(arguments: list[str]) -> list[Path] | str:
-    """Return the files named by `arguments`, expanding glob patterns.
+    """Return the files named by arguments, expanding glob patterns.
 
     An argument with any of `GLOB_CHARACTERS` is a pattern, which must
-    match at least one file; its matches are sorted.  Returns an error
-    string if an argument is not a file or a pattern matches nothing.
+    match at least one file; its matches are sorted.
+
+    Arguments:
+    * `arguments` (`list[str]`):
+      The file names and patterns.
+
+    Returns:
+    * (`list[Path] | str`): The files, or an error string if an argument
+      is not a file or a pattern matches nothing.
     """
     files: list[Path] = []
     for argument in arguments:
@@ -646,12 +771,19 @@ def expand_files(arguments: list[str]) -> list[Path] | str:
 
 # Function `base_tag()`:
 def base_tag(title: str) -> str:
-    """Return the tag for `title`, before it is made unique.
+    """Return the tag for a title, before it is made unique.
 
     The tag is the first letter or digit of each word in lower case.
-    Punctuation is dropped, a hyphenated word only gives its first letter,
-    and the words in `TAG_IGNORED_WORDS` are left out.  If every word is
-    left out, the first letter or digit of `title` is used.
+    Punctuation is dropped, a hyphenated word only gives its first
+    letter, and the words in `TAG_IGNORED_WORDS` are left out.  If every
+    word is left out, the first letter or digit of `title` is used.
+
+    Arguments:
+    * `title` (`str`):
+      The item's title.
+
+    Returns:
+    * (`str`): The tag, without a collection prefix.
     """
     tag: str = ""
     for word in title.split():
@@ -669,7 +801,18 @@ def base_tag(title: str) -> str:
 
 # Function `unique_tag()`:
 def unique_tag(base: str, used: Iterable[str]) -> str:
-    """Return `base`, or `base` plus the lowest number from 2 not `used`."""
+    """Return a tag that is not already used.
+
+    Arguments:
+    * `base` (`str`):
+      The tag from `base_tag()`.
+    * `used` (`Iterable[str]`):
+      The tags already in use.
+
+    Returns:
+    * (`str`): `base`, or `base` plus the lowest number from 2 that
+      makes it unused.
+    """
     used_tags: set[str] = set(used)
     if base not in used_tags:
         return base
@@ -681,9 +824,15 @@ def unique_tag(base: str, used: Iterable[str]) -> str:
 
 # Function `parse_priority()`:
 def parse_priority(level: str) -> int | None | str:
-    """Convert a priority `level` like "2" into 2, or "-" into None.
+    """Convert a priority level like "2" into 2, or "-" into `None`.
 
-    Returns an error string if `level` is not a valid priority.
+    Arguments:
+    * `level` (`str`):
+      The priority level.
+
+    Returns:
+    * (`int | None | str`): The priority, `None` for no priority, or an
+      error string if `level` is not a valid priority.
     """
     if level == "-":
         return None
@@ -697,22 +846,45 @@ def parse_priority(level: str) -> int | None | str:
 
 # Function `number_text()`:
 def number_text(name: tuple[int, ...]) -> str:
-    """Return `name` as period separated numbers, like "1.2.3"."""
+    """Return an item name as period separated numbers, like "1.2.3".
+
+    Arguments:
+    * `name` (`tuple[int, ...]`):
+      The item name.
+
+    Returns:
+    * (`str`): The item number.
+    """
     return ".".join(str(part) for part in name)
 
 
 # Function `tag_prefix()`:
 def tag_prefix(collection_name: str) -> str:
-    """Return the tag prefix of a collection, like "T." for "TASKS"."""
+    """Return the tag prefix of a collection, like "T." for "TASKS".
+
+    Arguments:
+    * `collection_name` (`str`):
+      The name of the collection.
+
+    Returns:
+    * (`str`): The tag prefix.
+    """
     return f"{collection_name[:1].upper()}."
 
 
 # Function `tag_collection()`:
 def tag_collection(word: str, names: list[str]) -> str:
-    """Return the collection of `names` whose tag prefix starts `word`.
+    """Return the collection whose tag prefix starts a word.
 
-    Returns an empty string unless `word` looks like a tag (e.g. "I.dbzib")
-    and its prefix belongs to one of the `names`.
+    Arguments:
+    * `word` (`str`):
+      The word, which may be a tag like "I.dbzib".
+    * `names` (`list[str]`):
+      The names of the collections.
+
+    Returns:
+    * (`str`): The collection name, or "" unless `word` looks like a tag
+      and its prefix belongs to one of the `names`.
     """
     if len(word) < 3 or word[1] != ".":
         return ""
@@ -723,16 +895,34 @@ def tag_collection(word: str, names: list[str]) -> str:
 
 # Function `summary_heading()`:
 def summary_heading(tag: str, title: str) -> str:
-    """Return the first line of an item's `Summary.md`."""
+    """Return the first line of an item's `Summary.md`.
+
+    Arguments:
+    * `tag` (`str`):
+      The item's tag, with its collection prefix.
+    * `title` (`str`):
+      The item's title.
+
+    Returns:
+    * (`str`): The heading line.
+    """
     return f"# Summary of `{tag}` {title}"
 
 
 # Function `write_summary_heading()`:
 def write_summary_heading(item_directory: Path, heading: str) -> None:
-    """Make `heading` the first line of the item's `Summary.md`.
+    """Make a heading the first line of an item's `Summary.md`.
 
     The old heading is replaced, or the file is made if it is missing.
-    Raises an `OSError` if the file can not be read or written.
+
+    Arguments:
+    * `item_directory` (`Path`):
+      The item's directory.
+    * `heading` (`str`):
+      The new heading line.
+
+    Raises:
+    * `OSError`: If the file can not be read or written.
     """
     path: Path = item_directory / "Summary.md"
     text: str = read_file(path) if path.exists() else ""
@@ -744,7 +934,15 @@ def write_summary_heading(item_directory: Path, heading: str) -> None:
 
 # Function `has_summary()`:
 def has_summary(item_directory: Path) -> bool:
-    """Return whether the item's `Summary.md` says more than its heading."""
+    """Return whether an item's `Summary.md` says more than its heading.
+
+    Arguments:
+    * `item_directory` (`Path`):
+      The item's directory.
+
+    Returns:
+    * (`bool`): True if the summary has text below its heading.
+    """
     try:
         text: str = read_file(item_directory / "Summary.md")
     except OSError:
@@ -756,11 +954,20 @@ def has_summary(item_directory: Path) -> bool:
 
 # Function `tag_references()`:
 def tag_references(root: Path, tag: str) -> list[Path]:
-    """Return the writable `.md` files under `root` that mention `tag`.
+    """Return the writable `.md` files that mention a tag.
 
     Hidden directories (like `.git`) and symbolic links are skipped.  A
     mention is the whole tag, so "T.fbm" is not found in "T.fbm2" or
     "XT.fbm".
+
+    Arguments:
+    * `root` (`Path`):
+      The directory to search.
+    * `tag` (`str`):
+      The tag, with its collection prefix.
+
+    Returns:
+    * (`list[Path]`): The files that mention `tag`.
     """
     pattern: re.Pattern[str] = tag_pattern(tag)
     found: list[Path] = []
@@ -783,15 +990,29 @@ def tag_references(root: Path, tag: str) -> list[Path]:
 
 # Function `tag_pattern()`:
 def tag_pattern(tag: str) -> re.Pattern[str]:
-    """Return a pattern that finds the whole `tag` in text."""
+    """Return a pattern that finds a whole tag in text.
+
+    Arguments:
+    * `tag` (`str`):
+      The tag, with its collection prefix.
+
+    Returns:
+    * (`re.Pattern[str]`): The pattern.
+    """
     return re.compile(rf"(?<![\w.]){re.escape(tag)}(?!\w)")
 
 
 # Function `parse_number()`:
 def parse_number(number: str) -> tuple[int, ...] | str:
-    """Convert a number like "1.2.3" into a name like (1, 2, 3).
+    """Convert an item number like "1.2.3" into a name like (1, 2, 3).
 
-    Returns the name, or an error string if the number is invalid.
+    Arguments:
+    * `number` (`str`):
+      The item number.
+
+    Returns:
+    * (`tuple[int, ...] | str`): The name, or an error string if the
+      number is invalid.
     """
     if not number:
         return "Item number is empty"
@@ -809,13 +1030,20 @@ def parse_number(number: str) -> tuple[int, ...] | str:
 
 # Function `clean_title()`:
 def clean_title(title: str) -> str:
-    """Return `title` cleaned up for use in an item directory name.
+    """Return a title cleaned up for use in an item directory name.
 
     Hyphens and underscores separate words, periods are kept, other
     punctuation is removed, a word with no letters or digits is dropped,
     the first word is capitalized and the words are joined by
     underscores.  The result can be pasted into a shell command without
-    quoting.  Returns an empty string if `title` has no words.
+    quoting.
+
+    Arguments:
+    * `title` (`str`):
+      The title.
+
+    Returns:
+    * (`str`): The cleaned title, or "" if `title` has no words.
     """
     remove: str = (
         string.punctuation.replace("-", "").replace("_", "").replace(".", "")
@@ -837,9 +1065,19 @@ def parse_recursive(
     arguments: list[str],
     resolve: Callable[[str], tuple[int, ...] | str] = parse_number,
 ) -> tuple[tuple[int, ...], bool] | str:
-    """Parse the `[-r] NUMBER` arguments of `command`.
+    """Parse the `[-r] NUMBER` arguments of a command.
 
-    Returns the item name and whether `-r` was given, or an error string.
+    Arguments:
+    * `command` (`str`):
+      The command, for the usage message.
+    * `arguments` (`list[str]`):
+      The command's arguments.
+    * `resolve` (`Callable[[str], tuple[int, ...] | str]`):
+      Converts a number or tag into an item name or an error string.
+
+    Returns:
+    * (`tuple[tuple[int, ...], bool] | str`): The item name and whether
+      `-r` was given, or an error string.
     """
     recursive: bool = False
     numbers: list[str] = []
@@ -890,9 +1128,11 @@ class Item:
     def __post_init__(self) -> None:
         """Ensure that the name and state are valid.
 
-        The name must be a non-empty tuple of positive integers and the
-        state must be one of `ALL_STATES` (`Items` checks that it is one of
-        its type's states).  Raises a `ValueError` if not.
+        `Items` also checks that the state is one of its type's states.
+
+        Raises:
+        * `ValueError`: If the name is not a non-empty tuple of positive
+          integers, or the state is not one of `ALL_STATES`.
         """
         if not (
             isinstance(self.name, tuple)
@@ -917,7 +1157,11 @@ class Item:
     # Method `Item.number()`:
     @property
     def number(self) -> str:
-        """Return the name as period separated numbers, like "1.2.3"."""
+        """Return the name as period separated numbers.
+
+        Returns:
+        * (`str`): The item number, like "1.2.3".
+        """
         return ".".join(str(part) for part in self.name)
 
 
@@ -937,12 +1181,16 @@ class Items:
 
     # Method `Items.__init__()`:
     def __init__(self, items_directory: Path) -> None:
-        """Initialize the collection of items in `items_directory`.
+        """Initialize the collection of items in a directory.
 
-        Creates `items_directory` and its `.ai_contexts.json` file if they are
-        not already present.  If the directory can not be created or is
-        not writable, an error is printed to stderr and `self.error` is
-        set to a non-empty error string.
+        The directory and its `.ai_contexts.json` file are created if
+        they are not already present.  If the directory can not be
+        created or is not writable, an error is printed to stderr and
+        `self.error` is set to a non-empty error string.
+
+        Arguments:
+        * `items_directory` (`Path`):
+          The collection's directory.
         """
         self.items_directory: Path = items_directory
         self.items: dict[tuple[int, ...], Item] = {}
@@ -1018,28 +1266,45 @@ class Items:
     # Method `Items.prefix()`:
     @property
     def prefix(self) -> str:
-        """Return the tag prefix of this collection, like "T."."""
+        """Return the tag prefix of this collection.
+
+        Returns:
+        * (`str`): The tag prefix, like "T.".
+        """
         return tag_prefix(self.items_directory.name)
 
     # Method `Items.collection_type_name()`:
     @property
     def collection_type_name(self) -> str:
-        """Return the name of this collection's type, like "items"."""
+        """Return the name of this collection's type.
+
+        Returns:
+        * (`str`): The type name, like "items".
+        """
         return str(self.settings.get("type", DEFAULT_TYPE))
 
     # Method `Items.collection_type()`:
     @property
     def collection_type(self) -> CollectionType:
-        """Return this collection's type."""
+        """Return this collection's type.
+
+        Returns:
+        * (`CollectionType`): The type.
+        """
         return TYPES[self.collection_type_name]
 
     # Method `Items.resolve()`:
     def resolve(self, word: str) -> tuple[int, ...] | str:
-        """Return the name of the item that `word` gives.
+        """Return the name of the item that a word gives.
 
-        `word` is an item number like "1.2.3", or a tag with or without
-        the collection prefix, in any case (e.g. "T.fbm" or "fbm").
-        Returns an error string if `word` is neither.
+        Arguments:
+        * `word` (`str`):
+          An item number like "1.2.3", or a tag with or without the
+          collection prefix, in any case (e.g. "T.fbm" or "fbm").
+
+        Returns:
+        * (`tuple[int, ...] | str`): The item name, or an error string
+          if `word` is neither.
         """
         if word and all(
             character.isdecimal() or character == "." for character in word
@@ -1061,9 +1326,15 @@ class Items:
         long: bool = False,
         old_numbers: list[str] | None = None,
     ) -> None:
-        """Print `items` with this collection's tag prefix and priority.
+        """Print items with this collection's tag prefix and priority.
 
-        If `old_numbers` is given, each item's old number comes first.
+        Arguments:
+        * `items` (`list[Item]`):
+          The items to print.
+        * `long` (`bool`):
+          True to also print the created and updated times.
+        * `old_numbers` (`list[str] | None`):
+          If given, the old number of each item, which is printed first.
         """
         print_items(
             items, long, self.priority_enabled, self.prefix, old_numbers
@@ -1072,36 +1343,65 @@ class Items:
     # Method `Items.priority_enabled()`:
     @property
     def priority_enabled(self) -> bool:
-        """Return whether priority is enabled for this collection."""
+        """Return whether priority is enabled for this collection.
+
+        Returns:
+        * (`bool`): True if priority is enabled.
+        """
         return self.settings.get("priority") is True
 
     # Method `Items.has_file()`:
     def has_file(self, file_name: str) -> bool:
-        """Return whether the items of this collection have `file_name`."""
+        """Return whether the items of this collection have a file.
+
+        Arguments:
+        * `file_name` (`str`):
+          The file name, like "Summary.md".
+
+        Returns:
+        * (`bool`): True if the collection's type has the file.
+        """
         return file_name in self.collection_type.files
 
     # Method `Items.root()`:
     @property
     def root(self) -> Path:
-        """Return the real path of the directory that holds the collections.
+        """Return the real path of the directory that holds the
+        collections.
 
         The sources of rules are kept relative to it.
+
+        Returns:
+        * (`Path`): The directory.
         """
         return self.items_directory.parent.resolve()
 
     # Method `Items.copy_path()`:
     def copy_path(self, item: Item) -> Path:
-        """Return where the copy of `item`'s source goes.
+        """Return where the copy of a rule's source goes.
 
         It is in the item directory, with the source file's name.
+
+        Arguments:
+        * `item` (`Item`):
+          The rule.
+
+        Returns:
+        * (`Path`): The path of the copy.
         """
         return self.directories[item.name] / Path(item.source).name
 
     # Method `Items.save_settings()`:
     def save_settings(self, settings: dict[str, object]) -> str:
-        """Write `settings` to `.ai_contexts.json` and keep them.
+        """Write settings to `.ai_contexts.json` and keep them.
 
-        Returns an empty string on success, or an error string on failure.
+        Arguments:
+        * `settings` (`dict[str, object]`):
+          The new settings.
+
+        Returns:
+        * (`str`): An empty string on success, or an error string on
+          failure.
         """
         collection_path: Path = self.items_directory / COLLECTION_FILE
         try:
@@ -1113,9 +1413,17 @@ class Items:
 
     # Method `Items.set_feature()`:
     def set_feature(self, feature: str, enabled: bool) -> str:
-        """Enable or disable `feature` in `.ai_contexts.json`.
+        """Enable or disable a feature in `.ai_contexts.json`.
 
-        Returns an empty string on success, or an error string on failure.
+        Arguments:
+        * `feature` (`str`):
+          The feature, like "priority".
+        * `enabled` (`bool`):
+          True to enable it, False to disable it.
+
+        Returns:
+        * (`str`): An empty string on success, or an error string on
+          failure.
         """
         return self.save_settings({**self.settings, feature: enabled})
 
@@ -1123,10 +1431,17 @@ class Items:
     def confirm_snapshot(self, ask: Callable[[str], str]) -> bool:
         """Before a move, rename or transfer, recommend a snapshot.
 
-        If there has been no move, rename or transfer in this collection for
-        `MOVE_RENAME_DELAY_SECONDS` (or the seconds in the `DELAY_VARIABLE`
-        environment variable), a reminder is printed to stderr and `ask`
-        asks whether to continue.  Returns whether to go ahead.
+        If there has been no move, rename or transfer in this collection
+        for `MOVE_RENAME_DELAY_SECONDS` (or the seconds in the
+        `DELAY_VARIABLE` environment variable), a reminder is printed to
+        stderr and the user is asked whether to continue.
+
+        Arguments:
+        * `ask` (`Callable[[str], str]`):
+          Asks the user a question and returns the answer.
+
+        Returns:
+        * (`bool`): True to go ahead.
         """
         delay: float = MOVE_RENAME_DELAY_SECONDS
         with contextlib.suppress(ValueError):
@@ -1163,7 +1478,9 @@ class Items:
     def note_move_or_rename(self) -> str:
         """Save the time of a move or rename in `.ai_contexts.json`.
 
-        Returns an empty string on success, or an error string on failure.
+        Returns:
+        * (`str`): An empty string on success, or an error string on
+          failure.
         """
         return self.save_settings(
             {
@@ -1233,10 +1550,13 @@ class Items:
 
     # Method `Items.missing_names()`:
     def missing_names(self) -> list[tuple[int, ...]]:
-        """Return the sorted names that are missing from the numbering.
+        """Return the names that are missing from the numbering.
 
         These are the absent parents of items and the absent earlier
         siblings of items and of their parents.
+
+        Returns:
+        * (`list[tuple[int, ...]]`): The missing names, sorted.
         """
         missing: set[tuple[int, ...]] = set()
         for name in self.items:
@@ -1255,9 +1575,16 @@ class Items:
     ) -> dict[tuple[int, ...], tuple[int, ...]]:
         """Return the new name of each item whose name must change.
 
-        The items are `names`, or else all of them.  Items keep their
-        order.  An item whose parent is missing becomes a child of its
-        nearest existing ancestor.
+        Items keep their order.  An item whose parent is missing becomes
+        a child of its nearest existing ancestor.
+
+        Arguments:
+        * `names` (`Iterable[tuple[int, ...]] | None`):
+          The names of the items, or `None` for all of them.
+
+        Returns:
+        * (`dict[tuple[int, ...], tuple[int, ...]]`): The new name of
+          each item whose name changes.
         """
         present: set[tuple[int, ...]] = set(
             self.items if names is None else names
@@ -1282,15 +1609,22 @@ class Items:
     def renumber(
         self, new_names: dict[tuple[int, ...], tuple[int, ...]]
     ) -> str:
-        """Give the items in `new_names` their new names.
+        """Give items their new names.
 
-        Each item directory is renamed (via a temporary name, so that the
-        new names can not collide with the old ones) and the heading of
-        its `Details.md` is rewritten.  The plan is first written to
+        Each item directory is renamed (via a temporary name, so that
+        the new names can not collide with the old ones) and the heading
+        of its `Details.md` is rewritten.  The plan is first written to
         `.renumber.json`, which is removed at the end, so that an
         interrupted renumbering is finished the next time the collection
-        is loaded.  Returns an empty string on success, or an error string
-        on failure.
+        is loaded.
+
+        Arguments:
+        * `new_names` (`dict[tuple[int, ...], tuple[int, ...]]`):
+          The new name of each item to rename.
+
+        Returns:
+        * (`str`): An empty string on success, or an error string on
+          failure.
         """
         if not new_names:
             return ""
@@ -1307,9 +1641,15 @@ class Items:
     def rename_records(
         self, new_names: dict[tuple[int, ...], tuple[int, ...]]
     ) -> list[dict[str, str]]:
-        """Return the renames that give the items `new_names`.
+        """Return the renames that give items their new names.
 
-        Each has the `RENAME_KEYS` of `.renumber.json`, in name order.
+        Arguments:
+        * `new_names` (`dict[tuple[int, ...], tuple[int, ...]]`):
+          The new name of each item to rename.
+
+        Returns:
+        * (`list[dict[str, str]]`): The renames, in name order, each
+          with the `RENAME_KEYS` of `.renumber.json`.
         """
         renames: list[dict[str, str]] = []
         for index, old in enumerate(sorted(new_names)):
@@ -1329,7 +1669,14 @@ class Items:
     def apply_renames(
         self, new_names: dict[tuple[int, ...], tuple[int, ...]]
     ) -> None:
-        """Give the items `new_names` in memory, after their directories."""
+        """Give items their new names in memory.
+
+        This is done after their directories are renamed.
+
+        Arguments:
+        * `new_names` (`dict[tuple[int, ...], tuple[int, ...]]`):
+          The new name of each renamed item.
+        """
         moving: list[Item] = [self.items[old] for old in sorted(new_names)]
         directories: list[Path] = [
             self.directories[item.name] for item in moving
@@ -1388,12 +1735,12 @@ class Items:
     def check_items(self) -> None:
         """Check the items each time the collection is loaded.
 
-        What ai_contexts maintains is fixed: the number in the `# N Title`
-        heading of `Details.md` and the heading of `Summary.md`.  What a
-        human maintains is reported, with what to do about it: a
-        `Details.md` without that heading, a title that no longer matches
-        the directory name, and items that share a tag.  Everything goes
-        to stderr.
+        What ai_contexts maintains is fixed: the number in the `# N
+        Title` heading of `Details.md` and the heading of `Summary.md`.
+        What a human maintains is reported, with what to do about it: a
+        `Details.md` without that heading, a title that no longer
+        matches the directory name, and items that share a tag.
+        Everything goes to stderr.
         """
         messages: list[str] = []
         tags: dict[str, list[str]] = {}
@@ -1462,11 +1809,11 @@ class Items:
         """Refresh and check the copies of the rules' sources.
 
         Each rule with a source has its copy refreshed (see
-        `refresh_rule()`).  A rule without a source, an Active rule without
-        a copy, a copy with an `@` import of a file (relative to the
-        source; a rule must stand alone) and a copy that is the same as a
-        file that `CLAUDE.md` imports directly are reported.  Everything
-        goes to stderr.
+        `refresh_rule()`).  A rule without a source, an Active rule
+        without a copy, a copy with an `@` import of a file (relative to
+        the source; a rule must stand alone) and a copy that is the same
+        as a file that `CLAUDE.md` imports directly are reported.
+        Everything goes to stderr.
         """
         messages: list[str] = []
         imported: dict[str, str] = self.claude_imports()
@@ -1513,10 +1860,13 @@ class Items:
 
     # Method `Items.claude_imports()`:
     def claude_imports(self) -> dict[str, str]:
-        """Return the files that `CLAUDE.md` imports, keyed by SHA-256.
+        """Return the files that `CLAUDE.md` imports.
 
         `CLAUDE.md` is in the directory that holds the collections.  An
         import that is not a readable file is left out.
+
+        Returns:
+        * (`dict[str, str]`): The imported files, keyed by SHA-256.
         """
         claude: Path = self.items_directory.parent / "CLAUDE.md"
         try:
@@ -1533,15 +1883,24 @@ class Items:
 
     # Method `Items.refresh_rule()`:
     def refresh_rule(self, item: Item, force: bool = False) -> str:
-        """Refresh the copy of the source of rule `item`.
+        """Refresh the copy of the source of a rule.
 
         The copy is left alone if it is the same as the source (the hash
-        is recorded if it was not), or if it was edited in place (its hash
-        is not the recorded one), unless `force`, or if the source is
-        missing.  Otherwise the source is copied to a temporary file,
+        is recorded if it was not), or if it was edited in place (its
+        hash is not the recorded one) unless `force`, or if the source
+        is missing.  Otherwise the source is copied to a temporary file,
         which is made read-only and then replaces the copy, and its hash
-        and the time are recorded in `.item.json`.  Returns what was done
-        or what is wrong, or an empty string if nothing was done.
+        and the time are recorded in `.item.json`.
+
+        Arguments:
+        * `item` (`Item`):
+          The rule.
+        * `force` (`bool`):
+          True to replace a copy that was edited in place.
+
+        Returns:
+        * (`str`): What was done or what is wrong, or an empty string if
+          nothing was done.
         """
         tag: str = f"{self.prefix}{item.tag}"
         item_directory: Path = self.directories[item.name]
@@ -1616,11 +1975,11 @@ class Items:
 
     # Method `Items.add_missing_summaries()`:
     def add_missing_summaries(self) -> None:
-        """Give an empty `Summary.md` to every item that does not have one.
+        """Give an empty `Summary.md` to every item without one.
 
-        This is for items made before `Summary.md` existed, so it is only
-        done if the collection's type has a `Summary.md`.  A file that can
-        not be written is reported to stderr.
+        This is for items made before `Summary.md` existed, so it is
+        only done if the collection's type has a `Summary.md`.  A file
+        that can not be written is reported to stderr.
         """
         if not self.has_file("Summary.md"):
             return
@@ -1643,8 +2002,9 @@ class Items:
     def add_missing_tags(self) -> None:
         """Give a unique tag to every item that does not have one.
 
-        This is for items made before tags existed, so the updated time is
-        not changed.  A tag that can not be written is reported to stderr.
+        This is for items made before tags existed, so the updated time
+        is not changed.  A tag that can not be written is reported to
+        stderr.
         """
         for item in self.list_items():
             if item.tag:
@@ -1668,9 +2028,14 @@ class Items:
 
     # Method `Items.list_items()`:
     def list_items(self, name: tuple[int, ...] = ()) -> list[Item]:
-        """Return the items starting with `name`, sorted by name.
+        """Return an item and its descendants, sorted by name.
 
-        An empty `name` returns all of the items.
+        Arguments:
+        * `name` (`tuple[int, ...]`):
+          The item's name, or `()` for all of the items.
+
+        Returns:
+        * (`list[Item]`): The items whose names start with `name`.
         """
         return [
             self.items[item_name]
@@ -1682,11 +2047,22 @@ class Items:
     def create_item(
         self, number: str, title: str, place: str = ""
     ) -> Item | str:
-        """Create a new Item at `number`, or `place` ("before" or "after")
-        the existing item `number` (a number or tag).
+        """Create a new item at a number, or before or after an item.
 
-        The later items are renumbered to make room.  Returns the new
-        Item, or an error string if it can not be created.
+        The later items are renumbered to make room.
+
+        Arguments:
+        * `number` (`str`):
+          The new item's number, or with `place`, the number or tag of
+          an existing item.
+        * `title` (`str`):
+          The new item's title.
+        * `place` (`str`):
+          "" to create the item at `number`, or "before" or "after".
+
+        Returns:
+        * (`Item | str`): The new item, or an error string if it can not
+          be created.
         """
         if place:
             return self.create_at_place(number, title, place)
@@ -1723,9 +2099,19 @@ class Items:
 
     # Method `Items.create_at_place()`:
     def create_at_place(self, word: str, title: str, place: str) -> Item | str:
-        """Create a new Item `place` ("before" or "after") item `word`.
+        """Create a new item before or after an existing item.
 
-        Returns the new Item, or an error string if it can not be created.
+        Arguments:
+        * `word` (`str`):
+          The number or tag of the existing item.
+        * `title` (`str`):
+          The new item's title.
+        * `place` (`str`):
+          "before" or "after".
+
+        Returns:
+        * (`Item | str`): The new item, or an error string if it can not
+          be created.
         """
         target: tuple[int, ...] | str = self.resolve(word)
         if isinstance(target, str):
@@ -1746,9 +2132,17 @@ class Items:
 
     # Method `Items.make_item()`:
     def make_item(self, name: tuple[int, ...], title: str) -> Item | str:
-        """Make the directory and files of a new item `name`.
+        """Make the directory and files of a new item.
 
-        Returns the new Item, or an error string if it can not be made.
+        Arguments:
+        * `name` (`tuple[int, ...]`):
+          The new item's name.
+        * `title` (`str`):
+          The new item's title.
+
+        Returns:
+        * (`Item | str`): The new item, or an error string if it can not
+          be made.
         """
         number: str = number_text(name)
         title = title.strip()
@@ -1797,9 +2191,17 @@ class Items:
     def select_items(
         self, name: tuple[int, ...], recursive: bool = False
     ) -> list[Item] | str:
-        """Return item `name`, and its children if `recursive`.
+        """Return an item, and its descendants if recursive.
 
-        Returns an error string if no item matches.
+        Arguments:
+        * `name` (`tuple[int, ...]`):
+          The item's name.
+        * `recursive` (`bool`):
+          True to include the item's descendants.
+
+        Returns:
+        * (`list[Item] | str`): The items, or an error string if no item
+          matches.
         """
         number: str = ".".join(str(part) for part in name)
         if recursive:
@@ -1813,14 +2215,23 @@ class Items:
 
     # Method `Items.rename_item()`:
     def rename_item(self, name: tuple[int, ...], title: str) -> Item | str:
-        """Change the title of item `name`.
+        """Change the title of an item.
 
-        The item directory is renamed to match, and the heading line of its
-        `Details.md` is rewritten, or added if it is missing, as is the
-        heading of its `Summary.md`.  The tag is
-        made from the new title, unless it would be the same as before.
-        The updated time is set to now.  Returns the renamed item, or an
-        error string if it can not be renamed.
+        The item directory is renamed to match, and the heading line of
+        its `Details.md` is rewritten, or added if it is missing, as is
+        the heading of its `Summary.md`.  The tag is made from the new
+        title, unless it would be the same as before.  The updated time
+        is set to now.
+
+        Arguments:
+        * `name` (`tuple[int, ...]`):
+          The item's name.
+        * `title` (`str`):
+          The new title.
+
+        Returns:
+        * (`Item | str`): The renamed item, or an error string if it can
+          not be renamed.
         """
         number: str = ".".join(str(part) for part in name)
         if name not in self.items:
@@ -1876,15 +2287,28 @@ class Items:
         target: tuple[int, ...],
         count: int = 1,
     ) -> tuple[dict[tuple[int, ...], tuple[int, ...]], tuple[int, ...]] | str:
-        """Plan putting the `moving` siblings (or new items) at a place.
+        """Plan putting sibling items (or new items) at a place.
 
-        `place` is "" for the free number `target`, or "before" or "after"
-        the existing item `target`.  `moving` is empty for a new item.  The
-        names refer to the items before anything moves.  Returns the new
-        name of every item whose name changes, and the new name of the
-        first moved (or new) item, or an error string if the place is not
-        valid.  When `moving` is empty, room is made for `count` new
-        sibling items, numbered from the first one.
+        The names refer to the items before anything moves.
+
+        Arguments:
+        * `moving` (`list[tuple[int, ...]]`):
+          The names of the sibling items to move, or empty for new
+          items.
+        * `place` (`str`):
+          "" for the free number `target`, or "before" or "after" the
+          existing item `target`.
+        * `target` (`tuple[int, ...]`):
+          The free number or existing item.
+        * `count` (`int`):
+          When `moving` is empty, the number of new sibling items to
+          make room for, numbered from the first one.
+
+        Returns:
+        * (`tuple[dict[tuple[int, ...], tuple[int, ...]], tuple[int,
+          ...]] | str`): The new name of every item whose name changes
+          and the new name of the first moved (or new) item, or an error
+          string if the place is not valid.
         """
         for name in moving:
             if name not in self.items:
@@ -1940,6 +2364,14 @@ class Items:
         def number(
             parent: tuple[int, ...], new_parent: tuple[int, ...]
         ) -> None:
+            """Give the descendants of a parent their new names.
+
+            Arguments:
+            * `parent` (`tuple[int, ...]`):
+              The parent's old name, or `()` for the top level.
+            * `new_parent` (`tuple[int, ...]`):
+              The parent's new name.
+            """
             for position, name in enumerate(children[parent], 1):
                 new_names[name] = new_parent + (position,)
                 number(name, new_names[name])
@@ -1954,11 +2386,16 @@ class Items:
 
     # Method `Items.resolve_range()`:
     def resolve_range(self, word: str) -> list[tuple[int, ...]] | str:
-        """Return the names that `word` gives.
+        """Return the names of the items that a word gives.
 
-        `word` is a number or tag (see `resolve()`), or a range of
-        siblings like "1.2.5-6".  Every item in a range must exist.
-        Returns an error string if `word` is not valid.
+        Arguments:
+        * `word` (`str`):
+          A number or tag (see `resolve()`), or a range of siblings like
+          "1.2.5-6".  Every item in a range must exist.
+
+        Returns:
+        * (`list[tuple[int, ...]] | str`): The names, or an error string
+          if `word` is not valid.
         """
         if "-" not in word:
             name: tuple[int, ...] | str = self.resolve(word)
@@ -1988,13 +2425,25 @@ class Items:
         recursive: bool = False,
         ask: Callable[[str], str] = input,
     ) -> tuple[list[Item], dict[str, Item]] | str:
-        """Delete the items `names`, and their children if `recursive`.
+        """Delete items, and their descendants if recursive.
 
-        An item with children is only deleted if `recursive`, and then only
-        if `ask` gets a yes answer.  Each item directory is removed along
-        with everything in it, and the later items are renumbered so that
-        there are no gaps.  Returns the deleted items and the renumbered
-        items keyed by their old numbers, or an error string on failure.
+        An item with children is only deleted if `recursive`, and then
+        only if the user answers yes.  Each item directory is removed
+        along with everything in it, and the later items are renumbered
+        so that there are no gaps.
+
+        Arguments:
+        * `names` (`list[tuple[int, ...]]`):
+          The names of the items to delete.
+        * `recursive` (`bool`):
+          True to delete the items' descendants too.
+        * `ask` (`Callable[[str], str]`):
+          Asks the user a question and returns the answer.
+
+        Returns:
+        * (`tuple[list[Item], dict[str, Item]] | str`): The deleted
+          items and the renumbered items keyed by their old numbers, or
+          an error string on failure.
         """
         for name in names:
             if name not in self.items:
@@ -2042,11 +2491,19 @@ class Items:
     def move_items(
         self, names: list[tuple[int, ...]], place: str, target: tuple[int, ...]
     ) -> dict[str, Item] | str:
-        """Move the sibling items `names`, with their children, to a place.
+        """Move sibling items, with their descendants, to a place.
 
-        `place` and `target` are as for `plan_place()`.  Returns the
-        renumbered items keyed by their old numbers, or an error string on
-        failure.
+        Arguments:
+        * `names` (`list[tuple[int, ...]]`):
+          The names of the sibling items to move.
+        * `place` (`str`):
+          As for `plan_place()`.
+        * `target` (`tuple[int, ...]`):
+          As for `plan_place()`.
+
+        Returns:
+        * (`dict[str, Item] | str`): The renumbered items keyed by their
+          old numbers, or an error string on failure.
         """
         planned: (
             tuple[dict[tuple[int, ...], tuple[int, ...]], tuple[int, ...]]
@@ -2071,10 +2528,21 @@ class Items:
         place: str,
         word: str,
     ) -> tuple[int, ...] | str:
-        """Check a transfer of the items `names` (see `transfer_items()`).
+        """Check a transfer of items (see `transfer_items()`).
 
-        Returns the name in `target` of the place `word`, or an error
-        string if the transfer is not valid.
+        Arguments:
+        * `names` (`list[tuple[int, ...]]`):
+          The names of the sibling items to transfer.
+        * `target` (`Items`):
+          The collection to transfer them to.
+        * `place` (`str`):
+          "", "before" or "after".
+        * `word` (`str`):
+          The number or tag of the place in `target`.
+
+        Returns:
+        * (`tuple[int, ...] | str`): The name in `target` of the place
+          `word`, or an error string if the transfer is not valid.
         """
         if target.items_directory == self.items_directory:
             return (
@@ -2111,19 +2579,31 @@ class Items:
         place: str,
         word: str,
     ) -> list[tuple[str, Item]] | str:
-        """Transfer the sibling items `names`, with their children, to
-        `target`, a collection of the same type, at a place there.
+        """Transfer sibling items and descendants to a collection.
 
-        The items go `place` ("", "before" or "after") the item or number
-        `word` of `target` (see `plan_place()`), in order.  Each item keeps
-        the rest of its tag if it is free in `target`, or else gets a new
-        one as `create` does; its `Details.md` and `Summary.md` headings
-        are fixed, and the transfer is added to the "moves" list of its
-        `.item.json`.  Both collections are renumbered to leave no gaps.
-        The plan is first written to `.transfer.json` (see
-        `do_transfer()`), so that an interrupted transfer is finished the
-        next time a collection is loaded.  Returns each transferred item
-        with its old tag, or an error string on failure.
+        The items go at the place in `target` (see `plan_place()`), in
+        order.  Each item keeps the rest of its tag if it is free in
+        `target`, or else gets a new one as `create` does; its
+        `Details.md` and `Summary.md` headings are fixed, and the
+        transfer is added to the "moves" list of its `.item.json`.  Both
+        collections are renumbered to leave no gaps.  The plan is first
+        written to `.transfer.json` (see `do_transfer()`), so that an
+        interrupted transfer is finished the next time a collection is
+        loaded.
+
+        Arguments:
+        * `names` (`list[tuple[int, ...]]`):
+          The names of the sibling items to transfer.
+        * `target` (`Items`):
+          The collection to transfer them to, which has the same type.
+        * `place` (`str`):
+          "", "before" or "after".
+        * `word` (`str`):
+          The number or tag of the place in `target`.
+
+        Returns:
+        * (`list[tuple[str, Item]] | str`): Each transferred item with
+          its old tag, or an error string on failure.
         """
         first: tuple[int, ...] | str = self.check_transfer(
             names, target, place, word
@@ -2211,11 +2691,23 @@ class Items:
     def set_state(
         self, name: tuple[int, ...], state: str, recursive: bool = False
     ) -> list[Item] | str:
-        """Set the state of item `name`, and its children if `recursive`.
+        """Set the state of an item, and its descendants if recursive.
 
         An item already in `state` is left unchanged.  Otherwise its
-        updated time is set to now and the change is added to its history.
-        Returns the selected items, or an error string on failure.
+        updated time is set to now and the change is added to its
+        history.
+
+        Arguments:
+        * `name` (`tuple[int, ...]`):
+          The item's name.
+        * `state` (`str`):
+          The new state.
+        * `recursive` (`bool`):
+          True to set the state of the item's descendants too.
+
+        Returns:
+        * (`list[Item] | str`): The selected items, or an error string
+          on failure.
         """
         states: tuple[str, ...] = self.collection_type.states
         if state not in states:
@@ -2247,10 +2739,18 @@ class Items:
     def set_priority(
         self, name: tuple[int, ...], priority: int | None
     ) -> Item | str:
-        """Set the priority of item `name`, or remove it if None.
+        """Set or remove the priority of an item.
 
-        The updated time is set to now.  Returns the item, or an error
-        string on failure.
+        The updated time is set to now.
+
+        Arguments:
+        * `name` (`tuple[int, ...]`):
+          The item's name.
+        * `priority` (`int | None`):
+          The new priority, or `None` to remove it.
+
+        Returns:
+        * (`Item | str`): The item, or an error string on failure.
         """
         selected: list[Item] | str = self.select_items(name)
         if isinstance(selected, str):
@@ -2270,8 +2770,17 @@ class Items:
     def feature_command(self, command: str, arguments: list[str]) -> str:
         """Run `enable FEATURE` or `disable FEATURE`.
 
-        FEATURE may be any unique prefix of a feature.  Returns an empty
-        string on success, or an error string on failure.
+        FEATURE may be any unique prefix of a feature.
+
+        Arguments:
+        * `command` (`str`):
+          "enable" or "disable".
+        * `arguments` (`list[str]`):
+          The command's arguments.
+
+        Returns:
+        * (`str`): An empty string on success, or an error string on
+          failure.
         """
         found: list[str] = matches(arguments[0], FEATURES) if arguments else []
         if len(arguments) != 1 or len(found) != 1:
@@ -2283,13 +2792,22 @@ class Items:
 
     # Method `Items.set_source()`:
     def set_source(self, name: tuple[int, ...], path: Path) -> Item | str:
-        """Make the file at `path` the source of rule `name`, and copy it.
+        """Make a file the source of a rule, and copy it.
 
         The source is kept relative to `root`, after the directories in
-        `path` are resolved to real ones; the file name is kept, so a file
-        that is a symbolic link is followed whenever it is read.  A copy
-        of the old source is removed, and the copy is always replaced.
-        Returns the rule, or an error string on failure.
+        `path` are resolved to real ones; the file name is kept, so a
+        file that is a symbolic link is followed whenever it is read.  A
+        copy of the old source is removed, and the copy is always
+        replaced.
+
+        Arguments:
+        * `name` (`tuple[int, ...]`):
+          The rule's name.
+        * `path` (`Path`):
+          The source file.
+
+        Returns:
+        * (`Item | str`): The rule, or an error string on failure.
         """
         selected: list[Item] | str = self.select_items(name)
         if isinstance(selected, str):
@@ -2324,9 +2842,15 @@ class Items:
 
     # Method `Items.source_command()`:
     def source_command(self, arguments: list[str]) -> str:
-        """Run `source NUMBER PATH`: set the source of a rule and copy it.
+        """Run `source NUMBER PATH`: set and copy the source of a rule.
 
-        Returns an empty string on success, or an error string on failure.
+        Arguments:
+        * `arguments` (`list[str]`):
+          The command's arguments.
+
+        Returns:
+        * (`str`): An empty string on success, or an error string on
+          failure.
         """
         if len(arguments) != 2:
             return "Usage: ai_contexts COLLECTION source NUMBER PATH"
@@ -2345,9 +2869,18 @@ class Items:
     ) -> str:
         """Run `refresh NUMBER`: copy a rule's source over its copy.
 
-        A copy that was edited in place is only replaced if `ask` gets a
-        yes answer.  Returns an empty string on success, or an error string
-        on failure.
+        A copy that was edited in place is only replaced if the user
+        answers yes.
+
+        Arguments:
+        * `arguments` (`list[str]`):
+          The command's arguments.
+        * `ask` (`Callable[[str], str]`):
+          Asks the user a question and returns the answer.
+
+        Returns:
+        * (`str`): An empty string on success, or an error string on
+          failure.
         """
         if len(arguments) != 1:
             return "Usage: ai_contexts COLLECTION refresh NUMBER"
@@ -2383,13 +2916,23 @@ class Items:
 
     # Method `Items.create_rules()`:
     def create_rules(self, place: str, word: str, paths: list[Path]) -> str:
-        """Create a rule for each of `paths`, at a place (see `plan_place()`).
+        """Create a rule from each of some files, at a place.
 
-        The first rule goes at `word` (a number, or a number or tag with a
-        `place`), and each of the others after the one before.  Each is
-        titled from its file name and has its source set.  The rules are
-        printed.  Returns an empty string on success, or an error string on
-        failure.
+        The first rule goes at `word` (see `plan_place()`), and each of
+        the others after the one before.  Each is titled from its file
+        name and has its source set.  The rules are printed.
+
+        Arguments:
+        * `place` (`str`):
+          "", "before" or "after".
+        * `word` (`str`):
+          A number, or with `place`, a number or tag.
+        * `paths` (`list[Path]`):
+          The source files.
+
+        Returns:
+        * (`str`): An empty string on success, or an error string on
+          failure.
         """
         created: list[Item] = []
         for path in paths:
@@ -2413,9 +2956,16 @@ class Items:
         """Run `type [TYPE]`: print or set the type of the collection.
 
         TYPE may be any unique prefix of a type.  The type can only be
-        changed while the collection is empty, so that no item is left in
-        a state that its type does not have.  Returns an empty string on
-        success, or an error string on failure.
+        changed while the collection is empty, so that no item is left
+        in a state that its type does not have.
+
+        Arguments:
+        * `arguments` (`list[str]`):
+          The command's arguments.
+
+        Returns:
+        * (`str`): An empty string on success, or an error string on
+          failure.
         """
         found: list[str] = matches(arguments[0], TYPES) if arguments else []
         if len(arguments) > 1 or (arguments and len(found) != 1):
@@ -2442,7 +2992,13 @@ class Items:
     def priority_command(self, arguments: list[str]) -> str:
         """Run `priority NUMBER LEVEL`.
 
-        Returns an empty string on success, or an error string on failure.
+        Arguments:
+        * `arguments` (`list[str]`):
+          The command's arguments.
+
+        Returns:
+        * (`str`): An empty string on success, or an error string on
+          failure.
         """
         if not self.priority_enabled:
             name: str = self.items_directory.name
@@ -2471,7 +3027,13 @@ class Items:
         In a collection with sources it is `create [before|after] NUMBER
         FILE...` (see `create_rules()`).
 
-        Returns an empty string on success, or an error string on failure.
+        Arguments:
+        * `arguments` (`list[str]`):
+          The command's arguments.
+
+        Returns:
+        * (`str`): An empty string on success, or an error string on
+          failure.
         """
         place: str = ""
         if arguments and arguments[0] in PLACES:
@@ -2498,9 +3060,18 @@ class Items:
     ) -> str:
         """Run `move NUMBER [before|after] NUMBER`.
 
-        A valid move may first ask to continue (see `confirm_snapshot()`).
-        Prints the renumbered items.  Returns an empty string on success,
-        or an error string on failure.
+        A valid move may first ask to continue (see
+        `confirm_snapshot()`).  The renumbered items are printed.
+
+        Arguments:
+        * `arguments` (`list[str]`):
+          The command's arguments.
+        * `ask` (`Callable[[str], str]`):
+          Asks the user a question and returns the answer.
+
+        Returns:
+        * (`str`): An empty string on success, or an error string on
+          failure.
         """
         place: str = ""
         if len(arguments) == 3 and arguments[1] in PLACES:
@@ -2550,13 +3121,24 @@ class Items:
     ) -> str:
         """Run `transfer NUMBER COLLECTION [[before|after] NUMBER]`.
 
-        COLLECTION is one of `collections`, by any unique prefix.  Without
-        a place, the items go to the next free top-level number.  A valid
-        transfer may first ask to continue (see `confirm_snapshot()`).
-        Prints the transferred items and the renumbered ones, then offers
-        to change their old tags in the project's `.md` files (see
-        `update_references()`).  Returns an empty string on success, or an
-        error string on failure.
+        COLLECTION is one of `collections`, by any unique prefix.
+        Without a place, the items go to the next free top-level number.
+        A valid transfer may first ask to continue (see
+        `confirm_snapshot()`).  The transferred items and the renumbered
+        ones are printed, then the user is offered a change of their old
+        tags in the project's `.md` files (see `update_references()`).
+
+        Arguments:
+        * `arguments` (`list[str]`):
+          The command's arguments.
+        * `collections` (`list[Items]`):
+          Every collection.
+        * `ask` (`Callable[[str], str]`):
+          Asks the user a question and returns the answer.
+
+        Returns:
+        * (`str`): An empty string on success, or an error string on
+          failure.
         """
         usage: str = (
             "Usage: ai_contexts COLLECTION transfer NUMBER COLLECTION "
@@ -2639,9 +3221,15 @@ class Items:
 
     # Method `Items.show_command()`:
     def show_command(self, arguments: list[str]) -> str:
-        """Run `show NUMBER`: print an item's details and its `Details.md`.
+        """Run `show NUMBER`: print everything about an item.
 
-        Returns an empty string on success, or an error string on failure.
+        Arguments:
+        * `arguments` (`list[str]`):
+          The command's arguments.
+
+        Returns:
+        * (`str`): An empty string on success, or an error string on
+          failure.
         """
         if len(arguments) != 1:
             return "Usage: ai_contexts COLLECTION show NUMBER"
@@ -2704,7 +3292,12 @@ class Items:
 
     # Method `Items.show_renumbered()`:
     def show_renumbered(self, renumbered: dict[str, Item]) -> None:
-        """Print the `renumbered` items, keyed by their old numbers."""
+        """Print the renumbered items, with their old numbers.
+
+        Arguments:
+        * `renumbered` (`dict[str, Item]`):
+          The renumbered items, keyed by their old numbers.
+        """
         if renumbered:
             print("Renumbered (old number first):")
             self.show(list(renumbered.values()), old_numbers=list(renumbered))
@@ -2713,10 +3306,16 @@ class Items:
     def list_command(self, arguments: list[str]) -> str:
         """Run `list [-a] [-l] [NUMBER]`.
 
-        Closed and Rejected items are left out, unless `-a` is given or it
-        is the item
-        NUMBER itself, and a note says how many.  Returns an empty string
-        on success, or an error string on failure.
+        Closed and Rejected items are left out, unless `-a` is given or
+        it is the item NUMBER itself, and a note says how many.
+
+        Arguments:
+        * `arguments` (`list[str]`):
+          The command's arguments.
+
+        Returns:
+        * (`str`): An empty string on success, or an error string on
+          failure.
         """
         long: bool = False
         everything: bool = False
@@ -2767,7 +3366,15 @@ class Items:
     def state_command(self, command: str, arguments: list[str]) -> str:
         """Run a state command, like `open`, with `[-r] NUMBER`.
 
-        Returns an empty string on success, or an error string on failure.
+        Arguments:
+        * `command` (`str`):
+          The state command.
+        * `arguments` (`list[str]`):
+          The command's arguments.
+
+        Returns:
+        * (`str`): An empty string on success, or an error string on
+          failure.
         """
         parsed: tuple[tuple[int, ...], bool] | str = parse_recursive(
             command, arguments, self.resolve
@@ -2790,8 +3397,17 @@ class Items:
         """Run `rename NUMBER to TITLE...`.
 
         A rename of an existing item to a usable title may first ask to
-        continue (see `confirm_snapshot()`).  Returns an empty string on
-        success, or an error string on failure.
+        continue (see `confirm_snapshot()`).
+
+        Arguments:
+        * `arguments` (`list[str]`):
+          The command's arguments.
+        * `ask` (`Callable[[str], str]`):
+          Asks the user a question and returns the answer.
+
+        Returns:
+        * (`str`): An empty string on success, or an error string on
+          failure.
         """
         if len(arguments) < 3 or arguments[1] != "to":
             return "Usage: ai_contexts COLLECTION rename NUMBER to TITLE..."
@@ -2822,12 +3438,22 @@ class Items:
     def update_references(
         self, tags: dict[str, str], ask: Callable[[str], str]
     ) -> str:
-        """Offer to change each old tag of `tags` to its new tag in the
-        project's `.md` files, in one pass.
+        """Offer to change old tags to new ones in the project's `.md`
+        files.
 
         The files are found by `tag_references()` in the directory that
-        holds the collections, and are only changed if `ask` gets a yes.
-        Returns an empty string on success, or an error string on failure.
+        holds the collections, and every old tag is changed in one pass
+        if the user answers yes.
+
+        Arguments:
+        * `tags` (`dict[str, str]`):
+          The new tag of each old tag.
+        * `ask` (`Callable[[str], str]`):
+          Asks the user a question and returns the answer.
+
+        Returns:
+        * (`str`): An empty string on success, or an error string on
+          failure.
         """
         root: Path = self.items_directory.parent
         paths: list[Path] = sorted(
@@ -2880,8 +3506,17 @@ class Items:
     ) -> str:
         """Run `delete [-r] NUMBER`, where NUMBER may be a range.
 
-        Prints the deleted items and the renumbered ones.  Returns an
-        empty string on success, or an error string on failure.
+        The deleted items and the renumbered ones are printed.
+
+        Arguments:
+        * `arguments` (`list[str]`):
+          The command's arguments.
+        * `ask` (`Callable[[str], str]`):
+          Asks the user a question and returns the answer.
+
+        Returns:
+        * (`str`): An empty string on success, or an error string on
+          failure.
         """
         recursive: bool = False
         words: list[str] = []
@@ -2911,11 +3546,21 @@ class Items:
     def create_collection(
         name: str, directories: list[Path], ask: Callable[[str], str]
     ) -> int:
-        """Run `NAME create` to create the collection directory `name`.
+        """Run `NAME create` to create a collection directory.
 
-        It goes next to the existing collection `directories`, or else in
-        the current directory, after `ask` gets a yes answer.  Returns 0
-        for success and 1 for failure.
+        It goes next to the existing collections, or else in the current
+        directory, if the user answers yes.
+
+        Arguments:
+        * `name` (`str`):
+          The name of the new collection, exactly as typed.
+        * `directories` (`list[Path]`):
+          The existing collections.
+        * `ask` (`Callable[[str], str]`):
+          Asks the user a question and returns the answer.
+
+        Returns:
+        * (`int`): 0 for success and 1 for failure.
         """
         if name in ("", ".", "..") or Path(name).name != name:
             print(f"Invalid collection name '{name}'", file=sys.stderr)
@@ -2969,9 +3614,12 @@ class Items:
     def list_collections() -> int:
         """Run `ai_contexts` with no arguments: list the collections.
 
-        Prints how many collections were found and where, a numbered line
-        for each with its tag prefix and how many items it has in each
-        state, and a pointer to the help.  Returns 0.
+        Prints how many collections were found and where, a numbered
+        line for each with its tag prefix and how many items it has in
+        each state, and a pointer to the help.
+
+        Returns:
+        * (`int`): 0.
         """
         directories: list[Path] = find_collections(Path.cwd())
         where: str = f" in '{directories[0].parent}'" if directories else ""
@@ -3013,9 +3661,15 @@ class Items:
     ) -> int:
         """Run an ai_contexts command.
 
-        `ask` is called with a yes/no question before a new collection is
-        created, and returns the answer.  Returns 0 for success and 1 for
-        failure.
+        Arguments:
+        * `arguments` (`list[str]`):
+          The command line arguments, without the program name.
+        * `ask` (`Callable[[str], str]`):
+          Asks the user a yes/no question, like whether to create a new
+          collection, and returns the answer.
+
+        Returns:
+        * (`int`): 0 for success and 1 for failure.
         """
         if not arguments:
             return Items.list_collections()
@@ -3138,14 +3792,21 @@ def write_startup(collections: list["Items"]) -> str:
     Nothing is written if there is no TASKS collection.  Every line of
     `Startup.md` is an `@` import, relative to the TASKS collection, so
     that adding `@TASKS/Startup.md` to `CLAUDE.md` loads them: the
-    `Details.md` of every item that is not Closed and the `Context.md` of
-    every Open or Reference item (the TASKS items first, then those of the
-    other `collections` in order), then the `Summary.md` (or `Details.md`
-    if the summary is empty) of the `CLOSED_SUMMARIES` (or the number in
-    the `SUMMARIES_VARIABLE` environment variable) most recently Closed
-    items, newest first, and finally `Closed.md` if there are older Closed
-    items (see `write_closed()`).  Returns an empty string on success, or
-    an error string on failure.
+    `Details.md` of every item that is not Closed and the `Context.md`
+    of every Open or Reference item (the TASKS items first, then those
+    of the other `collections` in order), then the `Summary.md` (or
+    `Details.md` if the summary is empty) of the `CLOSED_SUMMARIES` (or
+    the number in the `SUMMARIES_VARIABLE` environment variable) most
+    recently Closed items, newest first, and finally `Closed.md` if
+    there are older Closed items (see `write_closed()`).
+
+    Arguments:
+    * `collections` (`list[Items]`):
+      Every collection.
+
+    Returns:
+    * (`str`): An empty string on success, or an error string on
+      failure.
     """
     startup: Items | None = next(
         (
@@ -3211,7 +3872,7 @@ def write_startup(collections: list["Items"]) -> str:
 
 # Function `do_transfer()`:
 def do_transfer(directory: Path, plan: dict[str, object], phase: int) -> str:
-    """Do the transfer `plan` from the collection `directory`, from `phase`.
+    """Do a transfer from a collection, starting at a phase.
 
     The plan names the target collection (a sibling of `directory`), the
     time, the "items" (each with the `TRANSFER_KEYS`) and the renames of
@@ -3220,9 +3881,20 @@ def do_transfer(directory: Path, plan: dict[str, object], phase: int) -> str:
     names in the target, phase 2 renumbers the source, phase 3 renumbers
     the target to make room, and phase 4 fixes each item's headings and
     `.item.json` and gives it its new name.  Each step is skipped if it
-    has already been done, and `.transfer.json` in `directory` records the
-    plan and its phase until the end, when it is removed.  Returns an
-    empty string on success, or an error string on failure.
+    has already been done, and `.transfer.json` in `directory` records
+    the plan and its phase until the end, when it is removed.
+
+    Arguments:
+    * `directory` (`Path`):
+      The collection the items come from.
+    * `plan` (`dict[str, object]`):
+      The transfer plan, as in `.transfer.json`.
+    * `phase` (`int`):
+      The phase to start at.
+
+    Returns:
+    * (`str`): An empty string on success, or an error string on
+      failure.
     """
     marker: Path = directory / TRANSFER_FILE
     target: Path = directory.parent / str(plan["target"])
@@ -3232,11 +3904,26 @@ def do_transfer(directory: Path, plan: dict[str, object], phase: int) -> str:
     steps: list[int] = [0]
 
     def step() -> None:
+        """Count a step, and interrupt if the test suite asks.
+
+        Raises:
+        * `RenumberInterrupted`: If the steps exceed the number in the
+          `INTERRUPT_VARIABLE` environment variable.
+        """
         steps[0] += 1
         if limit.isdecimal() and steps[0] > int(limit):
             raise RenumberInterrupted
 
     def save(next_phase: int) -> None:
+        """Write the plan to `.transfer.json` with a phase.
+
+        Arguments:
+        * `next_phase` (`int`):
+          The phase to record.
+
+        Raises:
+        * `OSError`: If `.transfer.json` can not be written.
+        """
         write_file(
             marker, json.dumps({**plan, "phase": next_phase}, indent=2) + "\n"
         )
@@ -3309,9 +3996,21 @@ def do_transfer(directory: Path, plan: dict[str, object], phase: int) -> str:
 def plan_list(
     plan: dict[str, object], key: str, keys: tuple[str, ...]
 ) -> list[dict[str, str]]:
-    """Return the list `key` of `plan`, each entry with the `keys`.
+    """Return a list of JSON objects from a plan.
 
-    Raises a `ValueError` if it is not a list of JSON objects with them.
+    Arguments:
+    * `plan` (`dict[str, object]`):
+      The plan.
+    * `key` (`str`):
+      The key of the list in `plan`.
+    * `keys` (`tuple[str, ...]`):
+      The keys that each entry must have.
+
+    Returns:
+    * (`list[dict[str, str]]`): The entries of the list.
+
+    Raises:
+    * `ValueError`: If it is not a list of JSON objects with the `keys`.
     """
     entries: object = plan.get(key)
     if not isinstance(entries, list) or not all(
@@ -3324,11 +4023,15 @@ def plan_list(
 
 # Function `recover_transfers()`:
 def recover_transfers(parent: Path) -> None:
-    """Finish every interrupted transfer between the collections in `parent`.
+    """Finish every interrupted transfer between collections.
 
     This is done before any collection is loaded, since a collection in
-    the middle of a transfer can have gaps that must not be "fixed".  The
-    recovery, or a failure to recover, is reported to stderr.
+    the middle of a transfer can have gaps that must not be "fixed".
+    The recovery, or a failure to recover, is reported to stderr.
+
+    Arguments:
+    * `parent` (`Path`):
+      The directory that holds the collections.
     """
     try:
         directories: list[Path] = sorted(parent.iterdir())
@@ -3372,25 +4075,53 @@ def recover_transfers(parent: Path) -> None:
 def do_renumber(
     directory: Path, renames: list[dict[str, str]], phase: int
 ) -> str:
-    """Do the `renames` of a renumbering in `directory`, from `phase`.
+    """Do the renames of a renumbering in a collection, from a phase.
 
     Phase 1 renames the old directories to temporary names, phase 2
     renames those to the new names, and phase 3 rewrites the headings.
     Each step is skipped if it has already been done, and
     `.renumber.json` records the phase until the end, when it is
-    removed.  Returns an empty string on success, or an error string
-    on failure.
+    removed.
+
+    Arguments:
+    * `directory` (`Path`):
+      The collection.
+    * `renames` (`list[dict[str, str]]`):
+      The renames, each with the `RENAME_KEYS`.
+    * `phase` (`int`):
+      The phase to start at.
+
+    Returns:
+    * (`str`): An empty string on success, or an error string on
+      failure.
     """
     marker: Path = directory / RENUMBER_FILE
     limit: str = os.environ.get(INTERRUPT_VARIABLE, "")
     steps: list[int] = [0]
 
     def step() -> None:
+        """Count a step, and interrupt if the test suite asks.
+
+        Raises:
+        * `RenumberInterrupted`: If the steps exceed the number in the
+          `INTERRUPT_VARIABLE` environment variable.
+        """
         steps[0] += 1
         if limit.isdecimal() and steps[0] > int(limit):
             raise RenumberInterrupted
 
     def path(rename: dict[str, str], key: str) -> Path:
+        """Return the path of one of the names of a rename.
+
+        Arguments:
+        * `rename` (`dict[str, str]`):
+          The rename.
+        * `key` (`str`):
+          "old", "temporary" or "new".
+
+        Returns:
+        * (`Path`): The path in the collection.
+        """
         return directory / rename[key]
 
     try:
@@ -3434,10 +4165,17 @@ def do_renumber(
 def write_active_rules(collections: list["Items"]) -> str:
     """Write `Active_Rules.md` into each collection with sources.
 
-    Every line is an `@` import, relative to the collection, of the copy of
-    an Active item's source, in number order, so that adding
-    `@RULES/Active_Rules.md` to `CLAUDE.md` loads them.  Returns an empty
-    string on success, or an error string on failure.
+    Every line is an `@` import, relative to the collection, of the copy
+    of an Active item's source, in number order, so that adding
+    `@RULES/Active_Rules.md` to `CLAUDE.md` loads them.
+
+    Arguments:
+    * `collections` (`list[Items]`):
+      Every collection.
+
+    Returns:
+    * (`str`): An empty string on success, or an error string on
+      failure.
     """
     for collection in collections:
         if not collection.collection_type.has_sources:
@@ -3460,9 +4198,17 @@ def write_active_rules(collections: list["Items"]) -> str:
 
 # Function `closed_time()`:
 def closed_time(item: "Item", item_directory: Path) -> str:
-    """Return when `item` was last Closed, from its state history.
+    """Return when an item was last Closed, from its state history.
 
-    Returns its updated time if the history does not say.
+    Arguments:
+    * `item` (`Item`):
+      The item.
+    * `item_directory` (`Path`):
+      The item's directory.
+
+    Returns:
+    * (`str`): The UTC timestamp, or the item's updated time if the
+      history does not say.
     """
     with contextlib.suppress(OSError, ValueError):
         history: object = read_item(item_directory).get("history")
@@ -3477,11 +4223,18 @@ def closed_time(item: "Item", item_directory: Path) -> str:
 
 # Function `write_closed()`:
 def write_closed(closed_path: Path, older: list[tuple[str, str]]) -> str:
-    """Write `Closed.md`, or remove it if there are no `older` items.
+    """Write `Closed.md`, or remove it if there are no older items.
 
-    `older` holds the tag and title of each Closed item whose summary is
-    not in `Startup.md`, newest first.  Returns an empty string on
-    success, or an error string on failure.
+    Arguments:
+    * `closed_path` (`Path`):
+      The path of `Closed.md`.
+    * `older` (`list[tuple[str, str]]`):
+      The tag and title of each Closed item whose summary is not in
+      `Startup.md`, newest first.
+
+    Returns:
+    * (`str`): An empty string on success, or an error string on
+      failure.
     """
     lines: list[str] = [
         "# Older Closed and Rejected Items",
@@ -3512,10 +4265,19 @@ def print_items(
 ) -> None:
     """Print one line per item: number, state, priority, tag and title.
 
-    The priority is only printed if `priority`, with "-" for none.  Tags
-    are printed with `prefix`.  If `long`, the created and updated times
-    are also printed in the local time zone.  If `old_numbers` is given,
-    each line starts with the item's old number and "->".
+    Arguments:
+    * `items` (`list[Item]`):
+      The items to print.
+    * `long` (`bool`):
+      True to also print the created and updated times, in the local
+      time zone.
+    * `priority` (`bool`):
+      True to print the priority, with "-" for none.
+    * `prefix` (`str`):
+      The tag prefix.
+    * `old_numbers` (`list[str] | None`):
+      If given, the old number of each item, which starts its line with
+      "->".
     """
     old_width: int = max((len(old) for old in old_numbers or []), default=0)
     width: int = max((len(item.number) for item in items), default=0)

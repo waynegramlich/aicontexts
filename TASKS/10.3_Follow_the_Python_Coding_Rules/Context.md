@@ -15,3 +15,10 @@ arguments), and `Attributes:` and `Constructor:` docstring sections.
 `RenumberInterrupted` have `Attributes:` sections.  `Item.priority`
 stays `int | None`, since no priority is a real state.  The test file
 has no classes.
+Step 3 done: all 150 functions (109 in `ai_contexts.py`, 41 in the
+tests, including nested helpers) have docstrings with `Arguments:`,
+`Returns:` and `Raises:` sections (Raises lists exceptions that escape,
+not ones caught inside).  Written by hand in batches and applied with an
+`ast`-based script that rewraps each docstring to 72 columns; every new
+docstring line is 72 or fewer, so step 4 is left with comments, the
+module docstrings and anything else over 72.
