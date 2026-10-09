@@ -1,9 +1,9 @@
 @10_Do_some_additional_cleanup/Details.md
 @10_Do_some_additional_cleanup/Context.md
-@10.1_Rename_the_program/Details.md
-@10.1_Rename_the_program/Context.md
 @10.2_Add_a_couple_of_new_rules_and_enable_them/Details.md
+@10.2_Add_a_couple_of_new_rules_and_enable_them/Context.md
 @11_Review_README.md_together/Details.md
+@10.1_Rename_the_program/Summary.md
 @8_Explore_moving_items_between_collections/Summary.md
 @../ISSUES/1_Per_collection_state_sets/Summary.md
 @7_Explore_Having_a_Rules_Collection/Summary.md

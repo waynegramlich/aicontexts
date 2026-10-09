@@ -1,0 +1,19 @@
+{
+  "state": "Active",
+  "created": "2026-10-09T18:46:21Z",
+  "updated": "2026-10-09T18:46:22Z",
+  "history": [
+    {
+      "state": "InActive",
+      "time": "2026-10-09T18:46:21Z"
+    },
+    {
+      "state": "Active",
+      "time": "2026-10-09T18:46:22Z"
+    }
+  ],
+  "tag": "cmr",
+  "source": "../claude_code_rules/Code_Marker_Rules.md",
+  "sha256": "d85e48a1cf48cf14b49228ada5aa0407e355f242b362e567eb4cd728d237a362",
+  "refreshed": "2026-10-09T18:46:21Z"
+}

@@ -54,6 +54,7 @@ from ai_contexts import (
 Check = Callable[[bool, str], None]
 
 
+# Function `test()`:
 def test() -> int:
     """Test ai_contexts in a temporary directory.
 
@@ -101,6 +102,7 @@ def test() -> int:
     return 1 if failures else 0
 
 
+# Function `_test_parsing()`:
 def _test_parsing(check: Check) -> None:
     """Test `parse_number()` and `Item` validation."""
     check(parse_number("1.2.3") == (1, 2, 3), "parse 1.2.3")
@@ -208,6 +210,7 @@ def _test_parsing(check: Check) -> None:
             check(False, f"reject Item({name!r}, {state!r})")
 
 
+# Function `_test_items()`:
 def _test_items(check: Check, directory: Path) -> None:
     """Test creating, listing and changing the state of items."""
     items: Items = Items(directory)
@@ -290,6 +293,7 @@ def _test_items(check: Check, directory: Path) -> None:
     _test_list_and_state(check, items, directory)
 
 
+# Function `_test_list_and_state()`:
 def _test_list_and_state(
     check: Check, items: Items, directory: Path
 ) -> None:
@@ -370,6 +374,7 @@ def _test_list_and_state(
     )
 
 
+# Function `_test_reload()`:
 def _test_reload(check: Check, directory: Path) -> None:
     """Test loading items back from disk, including bad directories."""
     (directory / "junk").mkdir()
@@ -442,6 +447,7 @@ def _test_reload(check: Check, directory: Path) -> None:
         check(bool(Items(not_a_directory).error), "TASKS is a file")
 
 
+# Function `_test_rename_delete()`:
 def _test_rename_delete(check: Check, directory: Path) -> None:
     """Test `rename_item()` and `delete_items()`."""
     items: Items = Items(directory)
@@ -579,6 +585,7 @@ def _test_rename_delete(check: Check, directory: Path) -> None:
         directory.chmod(0o700)
 
 
+# Function `_test_numbering()`:
 def _test_numbering(check: Check, directory: Path) -> None:
     """Test numeric order, ranges, renumbering and fixing gaps."""
     items: Items = Items(directory)
@@ -666,6 +673,7 @@ def _test_numbering(check: Check, directory: Path) -> None:
     )
 
 
+# Function `_test_moving()`:
 def _test_moving(check: Check, directory: Path) -> None:
     """Test creating at a place and moving."""
     items: Items = Items(directory)
@@ -741,6 +749,7 @@ def _test_moving(check: Check, directory: Path) -> None:
     )
 
 
+# Function `_test_recovery()`:
 def _test_recovery(check: Check, directory: Path) -> None:
     """Test finishing a renumbering interrupted after every step."""
     directory.mkdir()
@@ -796,6 +805,7 @@ def _test_recovery(check: Check, directory: Path) -> None:
         )
 
 
+# Function `_test_references()`:
 def _test_references(check: Check, directory: Path) -> None:
     """Test finding and updating references to a renamed tag."""
     directory.mkdir()
@@ -878,6 +888,7 @@ def _test_references(check: Check, directory: Path) -> None:
         )
 
 
+# Function `_test_closed()`:
 def _test_closed(check: Check, directory: Path) -> None:
     """Test `Summary.md`, `Closed.md` and Closed items in `Startup.md`."""
     directory.mkdir()
@@ -1017,6 +1028,7 @@ def _test_closed(check: Check, directory: Path) -> None:
     )
 
 
+# Function `_test_checks()`:
 def _test_checks(check: Check, directory: Path) -> None:
     """Test the checks made each time a collection is loaded."""
     directory.mkdir()
@@ -1088,6 +1100,7 @@ def _test_checks(check: Check, directory: Path) -> None:
     check("Unable to check" in messages, "report a check that fails")
 
 
+# Function `_test_write_failures()`:
 def _test_write_failures(check: Check, directory: Path) -> None:
     """Test failing to write while renumbering or noting the time."""
     if os.geteuid() == 0:
@@ -1160,6 +1173,7 @@ def _test_write_failures(check: Check, directory: Path) -> None:
     )
 
 
+# Function `_test_snapshot_reminder()`:
 def _test_snapshot_reminder(
     check: Check, run: Callable[..., tuple[int, str]], answers: list[str]
 ) -> None:
@@ -1232,6 +1246,7 @@ def _test_snapshot_reminder(
             os.environ[DELAY_VARIABLE] = saved  # pragma: no cover
 
 
+# Function `_test_commands()`:
 def _test_commands(check: Check, directory: Path) -> None:
     """Test `run_command()` from inside `directory`."""
     answers: list[str] = []
@@ -1517,6 +1532,7 @@ def _test_commands(check: Check, directory: Path) -> None:
         os.chdir(original)
 
 
+# Function `_runner()`:
 def _runner(answers: list[str]) -> Callable[..., tuple[int, str]]:
     """Return a function that runs an ai_contexts command.
 
@@ -1541,6 +1557,7 @@ def _runner(answers: list[str]) -> Callable[..., tuple[int, str]]:
     return run
 
 
+# Function `_test_types()`:
 def _test_types(check: Check, directory: Path) -> None:
     """Test collection types, and a rules collection, from `directory`."""
     answers: list[str] = []
@@ -1665,6 +1682,7 @@ def _test_types(check: Check, directory: Path) -> None:
         os.chdir(original)
 
 
+# Function `_test_rules()`:
 def _test_rules(check: Check, directory: Path) -> None:
     """Test the rules of a rules collection, with their sources.
 
@@ -1920,6 +1938,7 @@ def _test_rules(check: Check, directory: Path) -> None:
         os.chdir(original)
 
 
+# Function `_test_rule_failures()`:
 def _test_rule_failures(
     check: Check, run: Callable[..., tuple[int, str]], rules: Path
 ) -> None:
@@ -1974,6 +1993,7 @@ def _test_rule_failures(
     )
 
 
+# Function `_test_transfer()`:
 def _test_transfer(check: Check, directory: Path) -> None:
     """Test `transfer`, which moves items between collections."""
     answers: list[str] = []
@@ -2098,6 +2118,7 @@ def _test_transfer(check: Check, directory: Path) -> None:
         os.chdir(original)
 
 
+# Function `_test_transfer_failures()`:
 def _test_transfer_failures(
     check: Check,
     run: Callable[..., tuple[int, str]],
@@ -2211,6 +2232,7 @@ def _test_transfer_failures(
     )
 
 
+# Function `_test_transfer_recovery()`:
 def _test_transfer_recovery(check: Check, directory: Path) -> None:
     """Test finishing a transfer interrupted after each of its steps.
 
@@ -2270,6 +2292,7 @@ def _test_transfer_recovery(check: Check, directory: Path) -> None:
         parent.chmod(0o700)
 
 
+# Function `_test_interrupted_transfer()`:
 def _test_interrupted_transfer(
     check: Check,
     directory: Path,
@@ -2327,6 +2350,7 @@ def _test_interrupted_transfer(
     check(limit > 3, f"a transfer of {name} has several steps")
 
 
+# Function `_test_errors()`:
 def _test_errors(check: Check, directory: Path) -> None:
     """Test the error paths for files that can not be read or written."""
     directory.mkdir()
@@ -2414,6 +2438,7 @@ def _test_errors(check: Check, directory: Path) -> None:
     )
 
 
+# Function `_test_old_collection_file()`:
 def _test_old_collection_file(check: Check, directory: Path) -> None:
     """Test the migration of `.tracker.json` to `.ai_contexts.json`."""
     for name in ("TASKS", "ISSUES", "plain"):

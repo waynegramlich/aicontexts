@@ -140,6 +140,7 @@ CONTEXT_STATES: tuple[str, ...] = ("Open", "Reference")
 RULE_STATES: tuple[str, ...] = ("Active", "InActive")
 
 
+# Class `CollectionType`:
 @dataclass(frozen=True)
 class CollectionType:
     """How the items of one type of collection behave.
@@ -343,20 +344,24 @@ COMMANDS: dict[str, str] = {
 }
 
 
+# Class `RenumberInterrupted`:
 class RenumberInterrupted(Exception):
     """A renumbering interrupted by the test suite (`INTERRUPT_VARIABLE`)."""
 
 
+# Function `read_file()`:
 def read_file(path: Path) -> str:
     """Return the contents of the UTF-8 text file at `path`."""
     return path.read_text(encoding="utf-8")
 
 
+# Function `write_file()`:
 def write_file(path: Path, text: str) -> None:
     """Write `text` to `path` as a UTF-8 text file."""
     path.write_text(text, encoding="utf-8")
 
 
+# Function `new_metadata()`:
 def new_metadata(state: str, stamp: str) -> dict[str, object]:
     """Return the metadata of a new item in `state` at time `stamp`.
 
@@ -370,12 +375,14 @@ def new_metadata(state: str, stamp: str) -> dict[str, object]:
     }
 
 
+# Function `write_item()`:
 def write_item(item_directory: Path, metadata: dict[str, object]) -> None:
     """Write the `metadata` into the `.item.json` of `item_directory`."""
     text: str = json.dumps(metadata, indent=2)
     write_file(item_directory / ITEM_FILE, f"{text}\n")
 
 
+# Function `utc_stamp()`:
 def utc_stamp(seconds: float) -> str:
     """Return `seconds` since the epoch as a UTC timestamp string.
 
@@ -384,6 +391,7 @@ def utc_stamp(seconds: float) -> str:
     return datetime.fromtimestamp(seconds, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+# Function `local_time()`:
 def local_time(stamp: str) -> str:
     """Return the UTC timestamp `stamp` in the local time zone.
 
@@ -401,6 +409,7 @@ def local_time(stamp: str) -> str:
     return moment.astimezone().strftime("%Y-%m-%d %H:%M")
 
 
+# Function `read_item()`:
 def read_item(item_directory: Path) -> dict[str, object]:
     """Return the metadata in the `.item.json` of `item_directory`.
 
@@ -426,6 +435,7 @@ def read_item(item_directory: Path) -> dict[str, object]:
     raise ValueError(f"'{item_path}' is not a JSON object")
 
 
+# Function `update_item()`:
 def update_item(
     item_directory: Path,
     state: str = "",
@@ -458,6 +468,7 @@ def update_item(
     return stamp
 
 
+# Function `matches()`:
 def matches(word: str, names: Iterable[str]) -> list[str]:
     """Return the `names` that `word` abbreviates, ignoring case.
 
@@ -471,6 +482,7 @@ def matches(word: str, names: Iterable[str]) -> list[str]:
     return [name for name in names if name.casefold().startswith(folded)]
 
 
+# Function `find_collections()`:
 def find_collections(start: Path) -> list[Path]:
     """Return the collection directories nearest to `start`, sorted.
 
@@ -506,6 +518,7 @@ def find_collections(start: Path) -> list[Path]:
     return []
 
 
+# Function `type_name()`:
 def type_name(directory: Path) -> str:
     """Return the type of the collection `directory`, from `.ai_contexts.json`.
 
@@ -521,6 +534,7 @@ def type_name(directory: Path) -> str:
     return DEFAULT_TYPE
 
 
+# Function `commands()`:
 def commands(name: str = "") -> dict[str, str]:
     """Return the commands of collection type `name`, or of every type.
 
@@ -534,6 +548,7 @@ def commands(name: str = "") -> dict[str, str]:
     return {**COMMANDS, **{command: command for command in type_commands}}
 
 
+# Function `sha256_of()`:
 def sha256_of(path: Path) -> str:
     """Return the SHA-256 of the file at `path`, in hexadecimal.
 
@@ -542,6 +557,7 @@ def sha256_of(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+# Function `markdown_imports()`:
 def markdown_imports(text: str) -> list[tuple[int, str]]:
     """Return the line number and path of each `@` import in `text`.
 
@@ -566,6 +582,7 @@ def markdown_imports(text: str) -> list[tuple[int, str]]:
     return found
 
 
+# Function `expand_files()`:
 def expand_files(arguments: list[str]) -> list[Path] | str:
     """Return the files named by `arguments`, expanding glob patterns.
 
@@ -588,6 +605,7 @@ def expand_files(arguments: list[str]) -> list[Path] | str:
     return files
 
 
+# Function `base_tag()`:
 def base_tag(title: str) -> str:
     """Return the tag for `title`, before it is made unique.
 
@@ -610,6 +628,7 @@ def base_tag(title: str) -> str:
     return tag
 
 
+# Function `unique_tag()`:
 def unique_tag(base: str, used: Iterable[str]) -> str:
     """Return `base`, or `base` plus the lowest number from 2 not `used`."""
     used_tags: set[str] = set(used)
@@ -621,6 +640,7 @@ def unique_tag(base: str, used: Iterable[str]) -> str:
     return f"{base}{number}"
 
 
+# Function `parse_priority()`:
 def parse_priority(level: str) -> int | None | str:
     """Convert a priority `level` like "2" into 2, or "-" into None.
 
@@ -636,16 +656,19 @@ def parse_priority(level: str) -> int | None | str:
     )
 
 
+# Function `number_text()`:
 def number_text(name: tuple[int, ...]) -> str:
     """Return `name` as period separated numbers, like "1.2.3"."""
     return ".".join(str(part) for part in name)
 
 
+# Function `tag_prefix()`:
 def tag_prefix(collection_name: str) -> str:
     """Return the tag prefix of a collection, like "T." for "TASKS"."""
     return f"{collection_name[:1].upper()}."
 
 
+# Function `tag_collection()`:
 def tag_collection(word: str, names: list[str]) -> str:
     """Return the collection of `names` whose tag prefix starts `word`.
 
@@ -659,11 +682,13 @@ def tag_collection(word: str, names: list[str]) -> str:
     )
 
 
+# Function `summary_heading()`:
 def summary_heading(tag: str, title: str) -> str:
     """Return the first line of an item's `Summary.md`."""
     return f"# Summary of `{tag}` {title}"
 
 
+# Function `write_summary_heading()`:
 def write_summary_heading(item_directory: Path, heading: str) -> None:
     """Make `heading` the first line of the item's `Summary.md`.
 
@@ -678,6 +703,7 @@ def write_summary_heading(item_directory: Path, heading: str) -> None:
     write_file(path, f"{heading}\n{rest}")
 
 
+# Function `has_summary()`:
 def has_summary(item_directory: Path) -> bool:
     """Return whether the item's `Summary.md` says more than its heading."""
     try:
@@ -689,6 +715,7 @@ def has_summary(item_directory: Path) -> bool:
     return bool(text.strip())
 
 
+# Function `tag_references()`:
 def tag_references(root: Path, tag: str) -> list[Path]:
     """Return the writable `.md` files under `root` that mention `tag`.
 
@@ -715,11 +742,13 @@ def tag_references(root: Path, tag: str) -> list[Path]:
     return found
 
 
+# Function `tag_pattern()`:
 def tag_pattern(tag: str) -> re.Pattern[str]:
     """Return a pattern that finds the whole `tag` in text."""
     return re.compile(rf"(?<![\w.]){re.escape(tag)}(?!\w)")
 
 
+# Function `parse_number()`:
 def parse_number(number: str) -> tuple[int, ...] | str:
     """Convert a number like "1.2.3" into a name like (1, 2, 3).
 
@@ -739,6 +768,7 @@ def parse_number(number: str) -> tuple[int, ...] | str:
     return tuple(name_list)
 
 
+# Function `clean_title()`:
 def clean_title(title: str) -> str:
     """Return `title` cleaned up for use in an item directory name.
 
@@ -762,6 +792,7 @@ def clean_title(title: str) -> str:
     return "_".join(words)
 
 
+# Function `parse_recursive()`:
 def parse_recursive(
     command: str,
     arguments: list[str],
@@ -786,6 +817,7 @@ def parse_recursive(
     return name, recursive
 
 
+# Class `Item`:
 @dataclass
 class Item:
     """A single item."""
@@ -799,6 +831,7 @@ class Item:
     priority: int | None = None
     source: str = ""
 
+    # Method `Item.__post_init__()`:
     def __post_init__(self) -> None:
         """Ensure that the name and state are valid.
 
@@ -826,15 +859,18 @@ class Item:
                 f"{', '.join(ALL_STATES)}"
             )
 
+    # Method `Item.number()`:
     @property
     def number(self) -> str:
         """Return the name as period separated numbers, like "1.2.3"."""
         return ".".join(str(part) for part in self.name)
 
 
+# Class `Items`:
 class Items:
     """A collection of items."""
 
+    # Method `Items.__init__()`:
     def __init__(self, items_directory: Path) -> None:
         """Initialize the collection of items in `items_directory`.
 
@@ -891,6 +927,7 @@ class Items:
             self.recover_renumber()
             self.load_items()
 
+    # Method `Items.check_version()`:
     def check_version(self) -> None:
         """Check the format version in `.ai_contexts.json`.
 
@@ -913,21 +950,25 @@ class Items:
         if error:
             print(error, file=sys.stderr)
 
+    # Method `Items.prefix()`:
     @property
     def prefix(self) -> str:
         """Return the tag prefix of this collection, like "T."."""
         return tag_prefix(self.items_directory.name)
 
+    # Method `Items.collection_type_name()`:
     @property
     def collection_type_name(self) -> str:
         """Return the name of this collection's type, like "items"."""
         return str(self.settings.get("type", DEFAULT_TYPE))
 
+    # Method `Items.collection_type()`:
     @property
     def collection_type(self) -> CollectionType:
         """Return this collection's type."""
         return TYPES[self.collection_type_name]
 
+    # Method `Items.resolve()`:
     def resolve(self, word: str) -> tuple[int, ...] | str:
         """Return the name of the item that `word` gives.
 
@@ -948,6 +989,7 @@ class Items:
                 return item.name
         return f"Invalid item number or tag '{word}'"
 
+    # Method `Items.show()`:
     def show(
         self,
         items: list[Item],
@@ -962,15 +1004,18 @@ class Items:
             items, long, self.priority_enabled, self.prefix, old_numbers
         )
 
+    # Method `Items.priority_enabled()`:
     @property
     def priority_enabled(self) -> bool:
         """Return whether priority is enabled for this collection."""
         return self.settings.get("priority") is True
 
+    # Method `Items.has_file()`:
     def has_file(self, file_name: str) -> bool:
         """Return whether the items of this collection have `file_name`."""
         return file_name in self.collection_type.files
 
+    # Method `Items.root()`:
     @property
     def root(self) -> Path:
         """Return the real path of the directory that holds the collections.
@@ -979,6 +1024,7 @@ class Items:
         """
         return self.items_directory.parent.resolve()
 
+    # Method `Items.copy_path()`:
     def copy_path(self, item: Item) -> Path:
         """Return where the copy of `item`'s source goes.
 
@@ -986,6 +1032,7 @@ class Items:
         """
         return self.directories[item.name] / Path(item.source).name
 
+    # Method `Items.save_settings()`:
     def save_settings(self, settings: dict[str, object]) -> str:
         """Write `settings` to `.ai_contexts.json` and keep them.
 
@@ -999,6 +1046,7 @@ class Items:
         self.settings = settings
         return ""
 
+    # Method `Items.set_feature()`:
     def set_feature(self, feature: str, enabled: bool) -> str:
         """Enable or disable `feature` in `.ai_contexts.json`.
 
@@ -1006,6 +1054,7 @@ class Items:
         """
         return self.save_settings({**self.settings, feature: enabled})
 
+    # Method `Items.confirm_snapshot()`:
     def confirm_snapshot(self, ask: Callable[[str], str]) -> bool:
         """Before a move, rename or transfer, recommend a snapshot.
 
@@ -1045,6 +1094,7 @@ class Items:
             return answer.strip().casefold() in ("y", "yes")
         return True
 
+    # Method `Items.note_move_or_rename()`:
     def note_move_or_rename(self) -> str:
         """Save the time of a move or rename in `.ai_contexts.json`.
 
@@ -1057,6 +1107,7 @@ class Items:
             }
         )
 
+    # Method `Items.load_items()`:
     def load_items(self) -> None:
         """Load the existing items from the item directories.
 
@@ -1115,6 +1166,7 @@ class Items:
         if self.collection_type.has_sources:
             self.check_rules()
 
+    # Method `Items.missing_names()`:
     def missing_names(self) -> list[tuple[int, ...]]:
         """Return the sorted names that are missing from the numbering.
 
@@ -1132,6 +1184,7 @@ class Items:
                 )
         return sorted(missing)
 
+    # Method `Items.gap_free_names()`:
     def gap_free_names(
         self, names: Iterable[tuple[int, ...]] | None = None
     ) -> dict[tuple[int, ...], tuple[int, ...]]:
@@ -1160,6 +1213,7 @@ class Items:
             new_names[name] = new_parent + (counts[new_parent],)
         return {old: new for old, new in new_names.items() if old != new}
 
+    # Method `Items.renumber()`:
     def renumber(
         self, new_names: dict[tuple[int, ...], tuple[int, ...]]
     ) -> str:
@@ -1184,6 +1238,7 @@ class Items:
         self.apply_renames(new_names)
         return error
 
+    # Method `Items.rename_records()`:
     def rename_records(
         self, new_names: dict[tuple[int, ...], tuple[int, ...]]
     ) -> list[dict[str, str]]:
@@ -1205,6 +1260,7 @@ class Items:
             )
         return renames
 
+    # Method `Items.apply_renames()`:
     def apply_renames(
         self, new_names: dict[tuple[int, ...], tuple[int, ...]]
     ) -> None:
@@ -1224,6 +1280,7 @@ class Items:
                 / f"{item.number}_{directory.name.partition('_')[2]}"
             )
 
+    # Method `Items.recover_renumber()`:
     def recover_renumber(self) -> None:
         """Finish an interrupted renumbering, if there is one.
 
@@ -1262,6 +1319,7 @@ class Items:
                 file=sys.stderr,
             )
 
+    # Method `Items.check_items()`:
     def check_items(self) -> None:
         """Check the items each time the collection is loaded.
 
@@ -1333,6 +1391,7 @@ class Items:
         for message in messages:
             print(message, file=sys.stderr)
 
+    # Method `Items.check_rules()`:
     def check_rules(self) -> None:
         """Refresh and check the copies of the rules' sources.
 
@@ -1386,6 +1445,7 @@ class Items:
         for message in messages:
             print(message, file=sys.stderr)
 
+    # Method `Items.claude_imports()`:
     def claude_imports(self) -> dict[str, str]:
         """Return the files that `CLAUDE.md` imports, keyed by SHA-256.
 
@@ -1405,6 +1465,7 @@ class Items:
                 ] = path
         return imported
 
+    # Method `Items.refresh_rule()`:
     def refresh_rule(self, item: Item, force: bool = False) -> str:
         """Refresh the copy of the source of rule `item`.
 
@@ -1461,6 +1522,7 @@ class Items:
             return f"Unable to refresh {tag}: {error}"
         return f"Refreshed {tag} from '{item.source}'"
 
+    # Method `Items.fix_gaps()`:
     def fix_gaps(self) -> None:
         """Renumber the items if there are gaps, reporting it to stderr.
 
@@ -1487,6 +1549,7 @@ class Items:
         if error:
             print(error, file=sys.stderr)
 
+    # Method `Items.add_missing_summaries()`:
     def add_missing_summaries(self) -> None:
         """Give an empty `Summary.md` to every item that does not have one.
 
@@ -1511,6 +1574,7 @@ class Items:
                     file=sys.stderr,
                 )
 
+    # Method `Items.add_missing_tags()`:
     def add_missing_tags(self) -> None:
         """Give a unique tag to every item that does not have one.
 
@@ -1537,6 +1601,7 @@ class Items:
                 continue
             item.tag = tag
 
+    # Method `Items.list_items()`:
     def list_items(self, name: tuple[int, ...] = ()) -> list[Item]:
         """Return the items starting with `name`, sorted by name.
 
@@ -1548,6 +1613,7 @@ class Items:
             if item_name[: len(name)] == name
         ]
 
+    # Method `Items.create_item()`:
     def create_item(
         self, number: str, title: str, place: str = ""
     ) -> Item | str:
@@ -1590,6 +1656,7 @@ class Items:
             )
         return self.make_item(name, title)
 
+    # Method `Items.create_at_place()`:
     def create_at_place(self, word: str, title: str, place: str) -> Item | str:
         """Create a new Item `place` ("before" or "after") item `word`.
 
@@ -1612,6 +1679,7 @@ class Items:
             return error
         return self.make_item(name, title)
 
+    # Method `Items.make_item()`:
     def make_item(self, name: tuple[int, ...], title: str) -> Item | str:
         """Make the directory and files of a new item `name`.
 
@@ -1662,6 +1730,7 @@ class Items:
         self.directories[name] = item_directory
         return item
 
+    # Method `Items.select_items()`:
     def select_items(
         self, name: tuple[int, ...], recursive: bool = False
     ) -> list[Item] | str:
@@ -1679,6 +1748,7 @@ class Items:
             return [self.items[name]]
         return f"Item '{number}' does not exist"
 
+    # Method `Items.rename_item()`:
     def rename_item(self, name: tuple[int, ...], title: str) -> Item | str:
         """Change the title of item `name`.
 
@@ -1735,6 +1805,7 @@ class Items:
         self.directories[name] = new_directory
         return item
 
+    # Method `Items.plan_place()`:
     def plan_place(
         self,
         moving: list[tuple[int, ...]],
@@ -1818,6 +1889,7 @@ class Items:
             if old != new and old not in new_items
         }, first
 
+    # Method `Items.resolve_range()`:
     def resolve_range(self, word: str) -> list[tuple[int, ...]] | str:
         """Return the names that `word` gives.
 
@@ -1846,6 +1918,7 @@ class Items:
                 return f"Item '{number_text(name)}' does not exist"
         return names
 
+    # Method `Items.delete_items()`:
     def delete_items(
         self,
         names: list[tuple[int, ...]],
@@ -1902,6 +1975,7 @@ class Items:
             return failure
         return doomed, renumbered
 
+    # Method `Items.move_items()`:
     def move_items(
         self, names: list[tuple[int, ...]], place: str, target: tuple[int, ...]
     ) -> dict[str, Item] | str:
@@ -1926,6 +2000,7 @@ class Items:
             for old, new in sorted(new_names.items())
         }
 
+    # Method `Items.check_transfer()`:
     def check_transfer(
         self,
         names: list[tuple[int, ...]],
@@ -1965,6 +2040,7 @@ class Items:
         ) = target.plan_place([], place, first)
         return planned if isinstance(planned, str) else first
 
+    # Method `Items.transfer_items()`:
     def transfer_items(
         self,
         names: list[tuple[int, ...]],
@@ -2068,6 +2144,7 @@ class Items:
             transferred.append((record["old_tag"], item))
         return transferred
 
+    # Method `Items.set_state()`:
     def set_state(
         self, name: tuple[int, ...], state: str, recursive: bool = False
     ) -> list[Item] | str:
@@ -2103,6 +2180,7 @@ class Items:
             item.state = state
         return changed
 
+    # Method `Items.set_priority()`:
     def set_priority(
         self, name: tuple[int, ...], priority: int | None
     ) -> Item | str:
@@ -2125,6 +2203,7 @@ class Items:
         item.priority = priority
         return item
 
+    # Method `Items.feature_command()`:
     def feature_command(self, command: str, arguments: list[str]) -> str:
         """Run `enable FEATURE` or `disable FEATURE`.
 
@@ -2139,6 +2218,7 @@ class Items:
             )
         return self.set_feature(found[0], command == "enable")
 
+    # Method `Items.set_source()`:
     def set_source(self, name: tuple[int, ...], path: Path) -> Item | str:
         """Make the file at `path` the source of rule `name`, and copy it.
 
@@ -2178,6 +2258,7 @@ class Items:
             return message
         return item
 
+    # Method `Items.source_command()`:
     def source_command(self, arguments: list[str]) -> str:
         """Run `source NUMBER PATH`: set the source of a rule and copy it.
 
@@ -2194,6 +2275,7 @@ class Items:
         self.show([changed])
         return ""
 
+    # Method `Items.refresh_command()`:
     def refresh_command(
         self, arguments: list[str], ask: Callable[[str], str] = input
     ) -> str:
@@ -2235,6 +2317,7 @@ class Items:
         print(message or f"{tag} is up to date")
         return ""
 
+    # Method `Items.create_rules()`:
     def create_rules(self, place: str, word: str, paths: list[Path]) -> str:
         """Create a rule for each of `paths`, at a place (see `plan_place()`).
 
@@ -2261,6 +2344,7 @@ class Items:
         self.show(created)
         return ""
 
+    # Method `Items.type_command()`:
     def type_command(self, arguments: list[str]) -> str:
         """Run `type [TYPE]`: print or set the type of the collection.
 
@@ -2290,6 +2374,7 @@ class Items:
         print(f"{name}: {self.collection_type_name}")
         return ""
 
+    # Method `Items.priority_command()`:
     def priority_command(self, arguments: list[str]) -> str:
         """Run `priority NUMBER LEVEL`.
 
@@ -2315,6 +2400,7 @@ class Items:
         self.show([changed])
         return ""
 
+    # Method `Items.create_command()`:
     def create_command(self, arguments: list[str]) -> str:
         """Run `create [before|after] NUMBER TITLE...`.
 
@@ -2342,6 +2428,7 @@ class Items:
         )
         return result if isinstance(result, str) else ""
 
+    # Method `Items.move_command()`:
     def move_command(
         self, arguments: list[str], ask: Callable[[str], str] = input
     ) -> str:
@@ -2390,6 +2477,7 @@ class Items:
         self.show_renumbered(renumbered)
         return ""
 
+    # Method `Items.transfer_command()`:
     def transfer_command(
         self,
         arguments: list[str],
@@ -2488,6 +2576,7 @@ class Items:
             ask,
         )
 
+    # Method `Items.show_command()`:
     def show_command(self, arguments: list[str]) -> str:
         """Run `show NUMBER`: print an item's details and its `Details.md`.
 
@@ -2553,6 +2642,7 @@ class Items:
         print(details, end="")
         return ""
 
+    # Method `Items.show_renumbered()`:
     def show_renumbered(self, renumbered: dict[str, Item]) -> None:
         """Print the `renumbered` items, keyed by their old numbers."""
         if renumbered:
@@ -2561,6 +2651,7 @@ class Items:
                 list(renumbered.values()), old_numbers=list(renumbered)
             )
 
+    # Method `Items.list_command()`:
     def list_command(self, arguments: list[str]) -> str:
         """Run `list [-a] [-l] [NUMBER]`.
 
@@ -2614,6 +2705,7 @@ class Items:
             )
         return ""
 
+    # Method `Items.state_command()`:
     def state_command(self, command: str, arguments: list[str]) -> str:
         """Run a state command, like `open`, with `[-r] NUMBER`.
 
@@ -2633,6 +2725,7 @@ class Items:
         self.show(changed)
         return ""
 
+    # Method `Items.rename_command()`:
     def rename_command(
         self, arguments: list[str], ask: Callable[[str], str] = input
     ) -> str:
@@ -2667,6 +2760,7 @@ class Items:
             return ""
         return self.update_references({old_tag: new_tag}, ask)
 
+    # Method `Items.update_references()`:
     def update_references(
         self, tags: dict[str, str], ask: Callable[[str], str]
     ) -> str:
@@ -2722,6 +2816,7 @@ class Items:
         )
         return ""
 
+    # Method `Items.delete_command()`:
     def delete_command(
         self, arguments: list[str], ask: Callable[[str], str] = input
     ) -> str:
@@ -2753,6 +2848,7 @@ class Items:
         self.show_renumbered(renumbered)
         return ""
 
+    # Method `Items.create_collection()`:
     @staticmethod
     def create_collection(
         name: str, directories: list[Path], ask: Callable[[str], str]
@@ -2810,6 +2906,7 @@ class Items:
             return 1
         return 0
 
+    # Method `Items.list_collections()`:
     @staticmethod
     def list_collections() -> int:
         """Run `ai_contexts` with no arguments: list the collections.
@@ -2853,6 +2950,7 @@ class Items:
         print("Type: `ai_contexts -h` for more help.")
         return 0
 
+    # Method `Items.run_command()`:
     @staticmethod
     def run_command(
         arguments: list[str], ask: Callable[[str], str] = input
@@ -2977,6 +3075,7 @@ class Items:
         return 0
 
 
+# Function `write_startup()`:
 def write_startup(collections: list["Items"]) -> str:
     """Write `Startup.md` (and `Closed.md`) into the TASKS collection.
 
@@ -3054,6 +3153,7 @@ def write_startup(collections: list["Items"]) -> str:
     return write_closed(startup.items_directory / "Closed.md", older)
 
 
+# Function `do_transfer()`:
 def do_transfer(directory: Path, plan: dict[str, object], phase: int) -> str:
     """Do the transfer `plan` from the collection `directory`, from `phase`.
 
@@ -3149,6 +3249,7 @@ def do_transfer(directory: Path, plan: dict[str, object], phase: int) -> str:
     return ""
 
 
+# Function `plan_list()`:
 def plan_list(
     plan: dict[str, object], key: str, keys: tuple[str, ...]
 ) -> list[dict[str, str]]:
@@ -3165,6 +3266,7 @@ def plan_list(
     return [{name: str(entry[name]) for name in keys} for entry in entries]
 
 
+# Function `recover_transfers()`:
 def recover_transfers(parent: Path) -> None:
     """Finish every interrupted transfer between the collections in `parent`.
 
@@ -3210,6 +3312,7 @@ def recover_transfers(parent: Path) -> None:
             )
 
 
+# Function `do_renumber()`:
 def do_renumber(
     directory: Path, renames: list[dict[str, str]], phase: int
 ) -> str:
@@ -3275,6 +3378,7 @@ def do_renumber(
     return ""
 
 
+# Function `write_active_rules()`:
 def write_active_rules(collections: list["Items"]) -> str:
     """Write `Active_Rules.md` into each collection with sources.
 
@@ -3302,6 +3406,7 @@ def write_active_rules(collections: list["Items"]) -> str:
     return ""
 
 
+# Function `closed_time()`:
 def closed_time(item: "Item", item_directory: Path) -> str:
     """Return when `item` was last Closed, from its state history.
 
@@ -3318,6 +3423,7 @@ def closed_time(item: "Item", item_directory: Path) -> str:
     return item.updated
 
 
+# Function `write_closed()`:
 def write_closed(closed_path: Path, older: list[tuple[str, str]]) -> str:
     """Write `Closed.md`, or remove it if there are no `older` items.
 
@@ -3344,6 +3450,7 @@ def write_closed(closed_path: Path, older: list[tuple[str, str]]) -> str:
     return ""
 
 
+# Function `print_items()`:
 def print_items(
     items: list[Item],
     long: bool = False,
@@ -3391,6 +3498,7 @@ def print_items(
         )
 
 
+# Function `main()`:
 def main() -> None:  # pragma: no cover
     """Run ai_contexts."""
     sys.exit(Items.run_command(sys.argv[1:]))
