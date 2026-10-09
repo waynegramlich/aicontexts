@@ -1,8 +1,13 @@
-@8_Review_README.md_together/Details.md
-@9_Explore_moving_items_between_collections/Summary.md
+@10_Do_some_additional_cleanup/Details.md
+@10_Do_some_additional_cleanup/Context.md
+@10.1_Rename_the_program/Details.md
+@10.1_Rename_the_program/Context.md
+@10.2_Add_a_couple_of_new_rules_and_enable_them/Details.md
+@11_Review_README.md_together/Details.md
+@8_Explore_moving_items_between_collections/Summary.md
 @../ISSUES/1_Per_collection_state_sets/Summary.md
 @7_Explore_Having_a_Rules_Collection/Summary.md
-@10_Hide_closed_items_and_check_on_startup/Summary.md
+@9_Hide_closed_items_and_check_on_startup/Summary.md
 @2_Cleanup/Summary.md
 @3_Support_Multiple_Item_Collections/Summary.md
 @4_Add_support_for_Issues/Summary.md

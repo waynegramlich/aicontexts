@@ -8,4 +8,11 @@ The version control rules are:
 * When Claude does an `hg` checkpoint, it does not tell the user.
 * The User is entirely disallowed from using `hg`.
 * The User is allowed to use features of `git`.
-* Claude may use all features of `git`, except `git commit`.
+* The User writes all `git` commit messages, so Claude never runs
+  `git commit`.
+* Claude must ask permission before running any `git` command that
+  modifies the commit log (e.g. `merge`, `rebase`, `reset`, `revert`,
+  `cherry-pick`, `pull`, `push`).
+* Claude does an `hg` checkpoint before any `git` command that changes
+  state (e.g. `add`, `mv`, `rm`, `restore`, `stash`).
+* Read-only `git` commands (e.g. `status`, `diff`, `log`) are free.

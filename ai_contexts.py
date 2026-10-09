@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A general purpose command line tool for tracking items."""
+"""Manage the AI contexts that Claude Code loads, kept in Markdown files."""
 
 import contextlib
 import glob
@@ -16,21 +16,21 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-HELP: str = """Usage: tracker COLLECTION COMMAND [ARGUMENTS...]
-       tracker TAG COMMAND [ARGUMENTS...]
-                               Same as `tracker COLLECTION COMMAND TAG ...`
+HELP: str = """Usage: ai_contexts COLLECTION COMMAND [ARGUMENTS...]
+       ai_contexts TAG COMMAND [ARGUMENTS...]
+                               Same as `ai_contexts COLLECTION COMMAND TAG ...`
                                for the collection of TAG (e.g. I.dbzib)
-       tracker NAME create     Create the collection directory NAME
-       tracker --test          Run the self tests in a temporary directory
-       tracker -h | --help     Print this help message
-       tracker                 List the collections, one line each
+       ai_contexts NAME create Create the collection directory NAME
+       ai_contexts --test      Run the self tests in a temporary directory
+       ai_contexts -h | --help Print this help message
+       ai_contexts             List the collections, one line each
 
-A COLLECTION is a directory containing a `.tracker.json` file.  They are
-found in the current directory, or else the nearest parent directory that
-has any.  COLLECTION and COMMAND may be shortened to any unique prefix, in
-any case (e.g. `tracker t cl 2` closes item 2 in TASKS).  A new collection
-is created, after asking, next to the existing ones (or else in the
-current directory) and is named exactly as typed.
+A COLLECTION is a directory containing a `.ai_contexts.json` file.  They
+are found in the current directory, or else the nearest parent directory
+that has any.  COLLECTION and COMMAND may be shortened to any unique
+prefix, in any case (e.g. `ai_contexts t cl 2` closes item 2 in TASKS).
+A new collection is created, after asking, next to the existing ones (or
+else in the current directory) and is named exactly as typed.
 
 Commands:
   create PLACE TITLE...   Create an item at PLACE (see below)
@@ -85,13 +85,13 @@ PLACE is one of:
   after NUMBER    Just after item NUMBER; its later siblings move down one
 Deleting or moving items moves the later siblings (and their children) up
 to close the gap.  There is no undo.  Before a move, rename or transfer,
-if the last one in the collection was more than an hour ago, tracker
+if the last one in the collection was more than an hour ago, ai_contexts
 recommends taking a version control snapshot (e.g. `git commit`) first,
 and asks whether to continue.
 
-Each collection has a type, kept in its `.tracker.json`, which decides its
-states, the files of its items and what Startup.md imports.  A new
-collection is an "items" collection.
+Each collection has a type, kept in its `.ai_contexts.json`, which
+decides its states, the files of its items and what Startup.md imports.
+A new collection is an "items" collection.
 
 The states of an "items" collection are: Pending, Open, Reference,
 Suspended, Closed, Rejected.  New items are created Pending.  Open items
@@ -165,7 +165,7 @@ class CollectionType:
     has_sources: bool
 
 
-# The types of collection, by the name kept in `.tracker.json`.  A
+# The types of collection, by the name kept in `.ai_contexts.json`.  A
 # collection without a type is an "items" collection.
 TYPES: dict[str, CollectionType] = {
     "items": CollectionType(
@@ -252,9 +252,13 @@ ITEM_FILE: str = ".item.json"
 OLD_STATUS_FILE: str = ".status"
 
 # The hidden JSON file that marks a directory as a collection of items.
-COLLECTION_FILE: str = ".tracker.json"
+COLLECTION_FILE: str = ".ai_contexts.json"
 
-# The version of the format of the collections, kept in `.tracker.json`.
+# The hidden JSON file that marked a collection when the program was
+# called `tracker`; it is renamed to `COLLECTION_FILE` when found.
+OLD_COLLECTION_FILE: str = ".tracker.json"
+
+# The version of the format of the collections, kept in `.ai_contexts.json`.
 FORMAT_VERSION: str = "0.1"
 
 # The hidden JSON file that holds a renumbering while it is being done, so
@@ -263,9 +267,9 @@ RENUMBER_FILE: str = ".renumber.json"
 
 # The environment variable with which the test suite interrupts a
 # renumbering after that many steps.
-INTERRUPT_VARIABLE: str = "TRACKER_TEST_RENUMBER_INTERRUPT"
+INTERRUPT_VARIABLE: str = "AI_CONTEXTS_TEST_RENUMBER_INTERRUPT"
 
-# The commands whose first argument is an item, so that `tracker TAG
+# The commands whose first argument is an item, so that `ai_contexts TAG
 # COMMAND ...` can be used.
 TAG_COMMANDS: frozenset[str] = frozenset(
     {
@@ -279,7 +283,7 @@ TAG_COMMANDS: frozenset[str] = frozenset(
 # the test suite can change it with the environment variable named by
 # `SUMMARIES_VARIABLE`.
 CLOSED_SUMMARIES: int = 50
-SUMMARIES_VARIABLE: str = "TRACKER_TEST_CLOSED_SUMMARIES"
+SUMMARIES_VARIABLE: str = "AI_CONTEXTS_TEST_CLOSED_SUMMARIES"
 
 # The hidden JSON file that holds a transfer of items to another collection
 # while it is being done, so that an interrupted transfer can be finished.
@@ -306,7 +310,7 @@ PRIORITIES: tuple[int, ...] = (0, 1, 2, 3)
 # to take a version control snapshot.  The test suite can change it with
 # the environment variable named by `DELAY_VARIABLE`.
 MOVE_RENAME_DELAY_SECONDS: float = 3600.0
-DELAY_VARIABLE: str = "TRACKER_TEST_MOVE_RENAME_DELAY_SECONDS"
+DELAY_VARIABLE: str = "AI_CONTEXTS_TEST_MOVE_RENAME_DELAY_SECONDS"
 
 # The places relative to an existing item.
 PLACES: tuple[str, ...] = ("before", "after")
@@ -314,7 +318,7 @@ PLACES: tuple[str, ...] = ("before", "after")
 # A stand-in name for an item that is about to be created.
 NEW_ITEM: tuple[int, ...] = (0,)
 
-# The features that can be enabled for a collection in `.tracker.json`.
+# The features that can be enabled for a collection in `.ai_contexts.json`.
 FEATURES: tuple[str, ...] = ("priority",)
 
 # The words that are left out of a tag.
@@ -471,8 +475,10 @@ def find_collections(start: Path) -> list[Path]:
     """Return the collection directories nearest to `start`, sorted.
 
     `start` and then each of its parents is searched for sub-directories
-    that contain a `.tracker.json` file.  The ones in the first directory
-    that has any are returned, or an empty list if none are found.
+    that contain a `.ai_contexts.json` file.  The ones in the first
+    directory that has any are returned, or an empty list if none are
+    found.  A collection in the old format, with a `.tracker.json` file
+    instead, is migrated by renaming that file.
     """
     for directory in (start, *start.parents):
         try:
@@ -480,16 +486,28 @@ def find_collections(start: Path) -> list[Path]:
                 path
                 for path in directory.iterdir()
                 if (path / COLLECTION_FILE).is_file()
+                or (path / OLD_COLLECTION_FILE).is_file()
             )
         except OSError:
             continue
+        for path in found:
+            old_path: Path = path / OLD_COLLECTION_FILE
+            if old_path.is_file() and not (path / COLLECTION_FILE).exists():
+                try:
+                    old_path.rename(path / COLLECTION_FILE)
+                except OSError as error:
+                    print(
+                        f"Can not rename '{old_path}' to "
+                        f"'{COLLECTION_FILE}': {error}",
+                        file=sys.stderr,
+                    )
         if found:
             return found
     return []
 
 
 def type_name(directory: Path) -> str:
-    """Return the type of the collection `directory`, from `.tracker.json`.
+    """Return the type of the collection `directory`, from `.ai_contexts.json`.
 
     Returns `DEFAULT_TYPE` if the file can not be read or has no type; an
     unknown type is returned as it is (`Items` reports it).
@@ -761,7 +779,7 @@ def parse_recursive(
         else:
             numbers.append(argument)
     if len(numbers) != 1:
-        return f"Usage: tracker COLLECTION {command} [-r] NUMBER"
+        return f"Usage: ai_contexts COLLECTION {command} [-r] NUMBER"
     name: tuple[int, ...] | str = resolve(numbers[0])
     if isinstance(name, str):
         return name
@@ -820,7 +838,7 @@ class Items:
     def __init__(self, items_directory: Path) -> None:
         """Initialize the collection of items in `items_directory`.
 
-        Creates `items_directory` and its `.tracker.json` file if they are
+        Creates `items_directory` and its `.ai_contexts.json` file if they are
         not already present.  If the directory can not be created or is
         not writable, an error is printed to stderr and `self.error` is
         set to a non-empty error string.
@@ -874,7 +892,7 @@ class Items:
             self.load_items()
 
     def check_version(self) -> None:
-        """Check the format version in `.tracker.json`.
+        """Check the format version in `.ai_contexts.json`.
 
         A collection made before versions existed is given
         `FORMAT_VERSION`; any other version than that is reported to
@@ -889,7 +907,8 @@ class Items:
         elif version != FORMAT_VERSION:
             error = (
                 f"'{self.items_directory / COLLECTION_FILE}' has version "
-                f"{version!r}, but this tracker uses version {FORMAT_VERSION}"
+                f"{version!r}, but this ai_contexts uses version "
+                f"{FORMAT_VERSION}"
             )
         if error:
             print(error, file=sys.stderr)
@@ -968,7 +987,7 @@ class Items:
         return self.directories[item.name] / Path(item.source).name
 
     def save_settings(self, settings: dict[str, object]) -> str:
-        """Write `settings` to `.tracker.json` and keep them.
+        """Write `settings` to `.ai_contexts.json` and keep them.
 
         Returns an empty string on success, or an error string on failure.
         """
@@ -981,7 +1000,7 @@ class Items:
         return ""
 
     def set_feature(self, feature: str, enabled: bool) -> str:
-        """Enable or disable `feature` in `.tracker.json`.
+        """Enable or disable `feature` in `.ai_contexts.json`.
 
         Returns an empty string on success, or an error string on failure.
         """
@@ -1027,7 +1046,7 @@ class Items:
         return True
 
     def note_move_or_rename(self) -> str:
-        """Save the time of a move or rename in `.tracker.json`.
+        """Save the time of a move or rename in `.ai_contexts.json`.
 
         Returns an empty string on success, or an error string on failure.
         """
@@ -1246,7 +1265,7 @@ class Items:
     def check_items(self) -> None:
         """Check the items each time the collection is loaded.
 
-        What tracker maintains is fixed: the number in the `# N Title`
+        What ai_contexts maintains is fixed: the number in the `# N Title`
         heading of `Details.md` and the heading of `Summary.md`.  What a
         human maintains is reported, with what to do about it: a
         `Details.md` without that heading, a title that no longer matches
@@ -1280,7 +1299,7 @@ class Items:
                 elif not heading.startswith(f"# {item.number} "):
                     messages.append(
                         f"{where}: its Details.md does not start with a "
-                        f"'# {item.number} TITLE' heading; `tracker "
+                        f"'# {item.number} TITLE' heading; `ai_contexts "
                         f"{self.prefix}{item.tag} rename to TITLE` adds one"
                     )
                 if clean_title(item.title) != item_directory.name.partition(
@@ -1288,7 +1307,7 @@ class Items:
                 )[2]:
                     messages.append(
                         f"{where}: its directory name does not match its "
-                        f"title '{item.title}'; `tracker "
+                        f"title '{item.title}'; `ai_contexts "
                         f"{self.prefix}{item.tag} rename to {item.title}` "
                         "fixes it"
                     )
@@ -1330,7 +1349,7 @@ class Items:
             tag: str = f"{self.prefix}{item.tag}"
             if not item.source:
                 messages.append(
-                    f"{tag} has no source; `tracker {tag} source PATH` "
+                    f"{tag} has no source; `ai_contexts {tag} source PATH` "
                     "sets one"
                 )
                 continue
@@ -1423,7 +1442,7 @@ class Items:
             if copy_hash and copy_hash != recorded and not force:
                 return (
                     f"{tag}: its copy '{copy_path}' was edited in place; "
-                    f"`tracker {tag} refresh` replaces it with its source "
+                    f"`ai_contexts {tag} refresh` replaces it with its source "
                     f"'{item.source}'"
                 )
             if not source_hash:
@@ -2070,7 +2089,7 @@ class Items:
                     tag: str = f"{self.prefix}{item.tag}"
                     return (
                         f"{tag} has no copy of a source to make Active; "
-                        f"`tracker {tag} source PATH` sets its source"
+                        f"`ai_contexts {tag} source PATH` sets its source"
                     )
         for item in changed:
             if item.state == state:
@@ -2115,7 +2134,7 @@ class Items:
         found: list[str] = matches(arguments[0], FEATURES) if arguments else []
         if len(arguments) != 1 or len(found) != 1:
             return (
-                f"Usage: tracker COLLECTION {command} FEATURE, where "
+                f"Usage: ai_contexts COLLECTION {command} FEATURE, where "
                 f"FEATURE is one of: {', '.join(FEATURES)}"
             )
         return self.set_feature(found[0], command == "enable")
@@ -2165,7 +2184,7 @@ class Items:
         Returns an empty string on success, or an error string on failure.
         """
         if len(arguments) != 2:
-            return "Usage: tracker COLLECTION source NUMBER PATH"
+            return "Usage: ai_contexts COLLECTION source NUMBER PATH"
         name: tuple[int, ...] | str = self.resolve(arguments[0])
         if isinstance(name, str):
             return name
@@ -2185,7 +2204,7 @@ class Items:
         on failure.
         """
         if len(arguments) != 1:
-            return "Usage: tracker COLLECTION refresh NUMBER"
+            return "Usage: ai_contexts COLLECTION refresh NUMBER"
         name: tuple[int, ...] | str = self.resolve(arguments[0])
         if isinstance(name, str):
             return name
@@ -2196,7 +2215,8 @@ class Items:
         tag: str = f"{self.prefix}{item.tag}"
         if not item.source:
             return (
-                f"{tag} has no source; `tracker {tag} source PATH` sets one"
+                f"{tag} has no source; `ai_contexts {tag} source PATH` "
+                "sets one"
             )
         message: str = self.refresh_rule(item)
         if "edited in place" in message:
@@ -2252,7 +2272,7 @@ class Items:
         found: list[str] = matches(arguments[0], TYPES) if arguments else []
         if len(arguments) > 1 or (arguments and len(found) != 1):
             return (
-                "Usage: tracker COLLECTION type [TYPE], where TYPE is one "
+                "Usage: ai_contexts COLLECTION type [TYPE], where TYPE is one "
                 f"of: {', '.join(TYPES)}"
             )
         name: str = self.items_directory.name
@@ -2279,10 +2299,10 @@ class Items:
             name: str = self.items_directory.name
             return (
                 f"Priority is not enabled for '{name}'; use "
-                f"`tracker {name} enable priority`"
+                f"`ai_contexts {name} enable priority`"
             )
         if len(arguments) != 2:
-            return "Usage: tracker COLLECTION priority NUMBER LEVEL"
+            return "Usage: ai_contexts COLLECTION priority NUMBER LEVEL"
         number: tuple[int, ...] | str = self.resolve(arguments[0])
         if isinstance(number, str):
             return number
@@ -2309,7 +2329,7 @@ class Items:
         sources: bool = self.collection_type.has_sources
         if len(arguments) < 2:
             return (
-                "Usage: tracker COLLECTION create [before|after] NUMBER "
+                "Usage: ai_contexts COLLECTION create [before|after] NUMBER "
                 + ("FILE..." if sources else "TITLE...")
             )
         if sources:
@@ -2336,7 +2356,8 @@ class Items:
             place = arguments[1]
         elif len(arguments) != 2:
             return (
-                "Usage: tracker COLLECTION move NUMBER [before|after] NUMBER"
+                "Usage: ai_contexts COLLECTION move NUMBER [before|after] "
+                "NUMBER"
             )
         names: list[tuple[int, ...]] | str = self.resolve_range(arguments[0])
         if isinstance(names, str):
@@ -2386,7 +2407,7 @@ class Items:
         error string on failure.
         """
         usage: str = (
-            "Usage: tracker COLLECTION transfer NUMBER COLLECTION "
+            "Usage: ai_contexts COLLECTION transfer NUMBER COLLECTION "
             "[[before|after] NUMBER]"
         )
         place: str = ""
@@ -2473,7 +2494,7 @@ class Items:
         Returns an empty string on success, or an error string on failure.
         """
         if len(arguments) != 1:
-            return "Usage: tracker COLLECTION show NUMBER"
+            return "Usage: ai_contexts COLLECTION show NUMBER"
         name: tuple[int, ...] | str = self.resolve(arguments[0])
         if isinstance(name, str):
             return name
@@ -2559,7 +2580,7 @@ class Items:
             else:
                 numbers.append(argument)
         if len(numbers) > 1:
-            return "Usage: tracker COLLECTION list [-a] [-l] [NUMBER]"
+            return "Usage: ai_contexts COLLECTION list [-a] [-l] [NUMBER]"
         name: tuple[int, ...] | str = (
             self.resolve(numbers[0]) if numbers else ()
         )
@@ -2622,7 +2643,7 @@ class Items:
         success, or an error string on failure.
         """
         if len(arguments) < 3 or arguments[1] != "to":
-            return "Usage: tracker COLLECTION rename NUMBER to TITLE..."
+            return "Usage: ai_contexts COLLECTION rename NUMBER to TITLE..."
         name: tuple[int, ...] | str = self.resolve(arguments[0])
         if isinstance(name, str):
             return name
@@ -2717,7 +2738,7 @@ class Items:
             else:
                 words.append(argument)
         if len(words) != 1:
-            return "Usage: tracker COLLECTION delete [-r] NUMBER"
+            return "Usage: ai_contexts COLLECTION delete [-r] NUMBER"
         names: list[tuple[int, ...]] | str = self.resolve_range(words[0])
         if isinstance(names, str):
             return names
@@ -2764,7 +2785,7 @@ class Items:
             )
             return 1
         try:
-            answer: str = ask(f"Create tracker directory '{path}'? [y/N] ")
+            answer: str = ask(f"Create collection directory '{path}'? [y/N] ")
         except EOFError:
             answer = ""
         if answer.strip().casefold() not in ("y", "yes"):
@@ -2791,7 +2812,7 @@ class Items:
 
     @staticmethod
     def list_collections() -> int:
-        """Run `tracker` with no arguments: list the collections.
+        """Run `ai_contexts` with no arguments: list the collections.
 
         Prints how many collections were found and where, a numbered line
         for each with its tag prefix and how many items it has in each
@@ -2828,15 +2849,15 @@ class Items:
                 )
             )
         if not directories:
-            print("`tracker NAME create` creates one.")
-        print("Type: `tracker -h` for more help.")
+            print("`ai_contexts NAME create` creates one.")
+        print("Type: `ai_contexts -h` for more help.")
         return 0
 
     @staticmethod
     def run_command(
         arguments: list[str], ask: Callable[[str], str] = input
     ) -> int:
-        """Run an item tracker command.
+        """Run an ai_contexts command.
 
         `ask` is called with a yes/no question before a new collection is
         created, and returns the answer.  Returns 0 for success and 1 for
@@ -2848,14 +2869,14 @@ class Items:
             print(HELP)
             return 0
         if arguments == ["--test"]:  # pragma: no cover
-            # The tests are in `tracker_test.py`, next to this file (even
-            # when tracker is run through a symbolic link).  They are not
+            # The tests are in `ai_contexts_test.py`, next to this file (even
+            # when ai_contexts is run through a symbolic link).  They are not
             # run from here when coverage is measured, which runs
-            # `tracker_test.py` itself.
+            # `ai_contexts_test.py` itself.
             sys.path.insert(0, str(Path(__file__).resolve().parent))
-            import tracker_test
+            import ai_contexts_test
 
-            return tracker_test.test()
+            return ai_contexts_test.test()
         error: str = ""
         directories: list[Path] = find_collections(Path.cwd())
         names: list[str] = [directory.name for directory in directories]
@@ -2865,7 +2886,7 @@ class Items:
             found = [tag_collection(arguments[0], names)]
             tag = arguments[0]
         # A collection's type decides its commands; when there is no such
-        # collection, every command is allowed (for `tracker NAME create`).
+        # collection, every command is allowed (for `ai_contexts NAME create`).
         known: dict[str, str] = commands(
             type_name(directories[names.index(found[0])])
             if len(found) == 1
@@ -2884,7 +2905,7 @@ class Items:
                 f"{', '.join(found)}"
             )
         elif len(arguments) < 2:
-            error = "Usage: tracker COLLECTION COMMAND [ARGUMENTS...]"
+            error = "Usage: ai_contexts COLLECTION COMMAND [ARGUMENTS...]"
         elif not matched:
             error = (
                 f"Unknown command '{arguments[1]}'; the commands are: "
@@ -2903,7 +2924,7 @@ class Items:
             error = f"No collection matches '{arguments[0]}'"
             if names:
                 error += f"; the collections are: {', '.join(names)}"
-            error += "\nUse `tracker NAME create` to create one."
+            error += "\nUse `ai_contexts NAME create` to create one."
         if error:
             print(error, file=sys.stderr)
             return 1
@@ -3307,9 +3328,9 @@ def write_closed(closed_path: Path, older: list[tuple[str, str]]) -> str:
     lines: list[str] = [
         "# Older Closed and Rejected Items",
         "",
-        "<!-- Written by tracker; do not edit. -->",
+        "<!-- Written by ai_contexts; do not edit. -->",
         "",
-        "These items are only listed by tag and title; `tracker TAG",
+        "These items are only listed by tag and title; `ai_contexts TAG",
         "show` shows the rest.",
         "",
     ] + [f"- `{tag}` {title}" for tag, title in older]
@@ -3371,7 +3392,7 @@ def print_items(
 
 
 def main() -> None:  # pragma: no cover
-    """Run the item tracker."""
+    """Run ai_contexts."""
     sys.exit(Items.run_command(sys.argv[1:]))
 
 

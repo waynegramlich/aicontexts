@@ -1,4 +1,4 @@
-"""The tests of tracker, run by `tracker --test`."""
+"""The tests of ai_contexts, run by `ai_contexts --test`."""
 
 import contextlib
 import hashlib
@@ -12,13 +12,14 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
-from tracker import (
+from ai_contexts import (
     CLOSED_SUMMARIES,
     COLLECTION_FILE,
     DELAY_VARIABLE,
     FORMAT_VERSION,
     INTERRUPT_VARIABLE,
     ITEM_FILE,
+    OLD_COLLECTION_FILE,
     OLD_STATUS_FILE,
     RENUMBER_FILE,
     STATES,
@@ -29,6 +30,7 @@ from tracker import (
     base_tag,
     clean_title,
     closed_time,
+    find_collections,
     has_summary,
     local_time,
     matches,
@@ -53,7 +55,7 @@ Check = Callable[[bool, str], None]
 
 
 def test() -> int:
-    """Test the item tracker in a temporary directory.
+    """Test ai_contexts in a temporary directory.
 
     Prints any failed checks and a summary.  Returns 0 if every check
     passes and 1 otherwise.
@@ -93,6 +95,8 @@ def test() -> int:
         _test_transfer(check, Path(temporary))
     with tempfile.TemporaryDirectory() as temporary:
         _test_transfer_recovery(check, Path(temporary))
+    with tempfile.TemporaryDirectory() as temporary:
+        _test_old_collection_file(check, Path(temporary))
     print(f"{len(checks)} checks, {len(failures)} failures")
     return 1 if failures else 0
 
@@ -226,7 +230,7 @@ def _test_items(check: Check, directory: Path) -> None:
     with contextlib.redirect_stderr(errors):
         Items(directory)
     check(
-        "has version '9.9', but this tracker uses version"
+        "has version '9.9', but this ai_contexts uses version"
         in errors.getvalue(),
         "report another format version",
     )
@@ -930,9 +934,9 @@ def _test_closed(check: Check, directory: Path) -> None:
         check(
             read_file(directory / "TASKS" / "Closed.md")
             == "# Older Closed and Rejected Items\n\n"
-            "<!-- Written by tracker; do not edit. -->\n\n"
+            "<!-- Written by ai_contexts; do not edit. -->\n\n"
             "These items are only listed by tag and title; "
-            "`tracker TAG\nshow` shows the rest.\n\n- `T.d` Delta\n",
+            "`ai_contexts TAG\nshow` shows the rest.\n\n- `T.d` Delta\n",
             "Closed.md lists the older closed items",
         )
         os.environ[SUMMARIES_VARIABLE] = "junk"
@@ -1046,12 +1050,12 @@ def _test_checks(check: Check, directory: Path) -> None:
         "fix a wrong number in a Details.md heading",
     )
     check(
-        "does not start with a '# 2 TITLE' heading; `tracker T.b rename to "
-        "TITLE` adds one" in messages,
+        "does not start with a '# 2 TITLE' heading; `ai_contexts T.b rename "
+        "to TITLE` adds one" in messages,
         "report a Details.md without a heading",
     )
     check(
-        "its directory name does not match its title 'Cee'; `tracker T.a "
+        "its directory name does not match its title 'Cee'; `ai_contexts T.a "
         "rename to Cee` fixes it" in messages,
         "report a title that no longer matches the directory",
     )
@@ -1254,7 +1258,12 @@ def _test_commands(check: Check, directory: Path) -> None:
     os.chdir(directory)
     try:
         for answer, arguments, code, text in (
-            ("", (), 0, "0 collections found\n`tracker NAME create` creates"),
+            (
+                "",
+                (),
+                0,
+                "0 collections found\n`ai_contexts NAME create` creates",
+            ),
             ("", ("--help",), 0, "Usage"),
             ("", ("-h",), 0, "Usage"),
             ("", ("--bogus",), 1, "Unknown option"),
@@ -1363,7 +1372,7 @@ def _test_commands(check: Check, directory: Path) -> None:
                 (
                     ":\n1 - Issues  I.  1 item: 1 Open\n"
                     "2 - TASKS   T.  2 items: 1 Open, 1 Reference\n"
-                    "Type: `tracker -h` for more help.\n"
+                    "Type: `ai_contexts -h` for more help.\n"
                 ),
             ),
             ("", ("i", "ls"), 0, "I.c  Crash"),
@@ -1414,7 +1423,7 @@ def _test_commands(check: Check, directory: Path) -> None:
         )
         check(
             questions[0]
-            == f"Create tracker directory '{Path.cwd() / 'TASKS'}'? "
+            == f"Create collection directory '{Path.cwd() / 'TASKS'}'? "
             "[y/N] ",
             "ask before creating a collection",
         )
@@ -1509,7 +1518,7 @@ def _test_commands(check: Check, directory: Path) -> None:
 
 
 def _runner(answers: list[str]) -> Callable[..., tuple[int, str]]:
-    """Return a function that runs a tracker command.
+    """Return a function that runs an ai_contexts command.
 
     It returns the exit code and everything printed.  Each question is
     answered with the next of `answers`, or EOF if there are none.
@@ -1597,7 +1606,7 @@ def _test_types(check: Check, directory: Path) -> None:
                 "type"
             ]
             == "rules",
-            "the type is kept in .tracker.json",
+            "the type is kept in .ai_contexts.json",
         )
         check(
             read_file(directory / "TASKS" / "Startup.md")
@@ -1774,7 +1783,7 @@ def _test_rules(check: Check, directory: Path) -> None:
         code, text = run("r", "ls")
         check(
             "R.ar: its copy '" in text
-            and "was edited in place; `tracker R.ar refresh`" in text
+            and "was edited in place; `ai_contexts R.ar refresh`" in text
             and read_file(copy) == "# A\n\nEdited.\n",
             "an edited copy is left alone",
         )
@@ -1892,7 +1901,8 @@ def _test_rules(check: Check, directory: Path) -> None:
         write_item(rules / "1_Link_Rule", metadata)
         code, text = run("r", "ls")
         check(
-            "R.lr has no source; `tracker R.lr source PATH` sets one" in text,
+            "R.lr has no source; `ai_contexts R.lr source PATH` sets one"
+            in text,
             "report a rule without a source",
         )
         check(
@@ -2357,7 +2367,7 @@ def _test_errors(check: Check, directory: Path) -> None:
         with contextlib.redirect_stderr(io.StringIO()):
             check(
                 message in Items(bad).error,
-                f"reject .tracker.json {text!r}",
+                f"reject .ai_contexts.json {text!r}",
             )
     if os.geteuid() == 0:
         # Permissions are not enforced for root.
@@ -2401,6 +2411,48 @@ def _test_errors(check: Check, directory: Path) -> None:
         "Unable to add tag" in errors.getvalue()
         and items.items[(1,)].tag == "",
         "add_missing_tags write failure",
+    )
+
+
+def _test_old_collection_file(check: Check, directory: Path) -> None:
+    """Test the migration of `.tracker.json` to `.ai_contexts.json`."""
+    for name in ("TASKS", "ISSUES", "plain"):
+        (directory / name).mkdir()
+    write_file(directory / "TASKS" / OLD_COLLECTION_FILE, '{"a": 1}\n')
+    write_file(directory / "ISSUES" / COLLECTION_FILE, "{}\n")
+    check(
+        find_collections(directory / "plain")
+        == [directory / "ISSUES", directory / "TASKS"],
+        "find collections in the old and new formats",
+    )
+    check(
+        read_file(directory / "TASKS" / COLLECTION_FILE) == '{"a": 1}\n'
+        and not (directory / "TASKS" / OLD_COLLECTION_FILE).exists(),
+        "rename an old .tracker.json",
+    )
+    # An old file next to a new one is left alone.
+    write_file(directory / "ISSUES" / OLD_COLLECTION_FILE, "[]\n")
+    find_collections(directory)
+    check(
+        read_file(directory / "ISSUES" / COLLECTION_FILE) == "{}\n"
+        and (directory / "ISSUES" / OLD_COLLECTION_FILE).is_file(),
+        "keep a new .ai_contexts.json over an old .tracker.json",
+    )
+    if os.geteuid() == 0:
+        return  # pragma: no cover
+    locked: Path = directory / "locked" / "NOTES"
+    locked.mkdir(parents=True)
+    write_file(locked / OLD_COLLECTION_FILE, "{}\n")
+    locked.chmod(0o500)
+    errors = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(errors):
+            found: list[Path] = find_collections(locked.parent)
+    finally:
+        locked.chmod(0o700)
+    check(
+        found == [locked] and "Can not rename" in errors.getvalue(),
+        "report an old .tracker.json that can not be renamed",
     )
 
 
