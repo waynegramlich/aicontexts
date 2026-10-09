@@ -1,5 +1,7 @@
 @11_Review_README.md_together/Details.md
 @11_Review_README.md_together/Context.md
+@../ISSUES/2_Limit_directory_searches_in_large_trees/Details.md
+@../ISSUES/3_Generate_the_AI_Contexts_Rules_file/Details.md
 @10_Do_some_additional_cleanup/Summary.md
 @10.3_Follow_the_Python_Coding_Rules/Summary.md
 @10.2_Add_a_couple_of_new_rules_and_enable_them/Summary.md

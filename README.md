@@ -1,168 +1,253 @@
-# AI Contexts: Managing What Claude Code Loads
+# AI Contexts: Startup Context for AI Sessions
 
-The `ai_contexts` program manages the context that Claude Code loads at the
-start of each session, kept in Markdown files.  (It was called `tracker`.)  The
-context is organized as directories of Items.  It can be used to manage Issues
-(i.e. bugs), Tasks (i.e. chunks of work), etc.  Each class of Item is an
-independent collection that lives in its own directory (e.g. `ISSUES/`,
-`TASKS/`.)  A collection directory is marked by a hidden `.ai_contexts.json`
-file, and is created (after asking) with `ai_contexts NAME create`.  (A
-`.tracker.json` file from before the rename is renamed when it is found.)  Each
-collection has a type, kept in its `.ai_contexts.json`: an "items" collection
-(the default, like `TASKS/` and `ISSUES/`) or a "rules" collection (see "Rules
-Collections" below).  `ai_contexts r type rules` sets the type, but only while
-the collection is empty.
+The `ai_contexts` program manages the context that an AI loads at session
+start time.  The context is broken into 3 broad categories:
 
-Every command names its collection first: `ai_contexts COLLECTION COMMAND ...`.
-Collection and command names can be shortened to any unique prefix, in any
-case, so `ai_contexts t cl 2` closes item 2 in `TASKS/`.  `ai_contexts` looks
-for collections in the current directory, or else the nearest parent directory
-that has any, so it works from anywhere inside a project.
+* **Tasks:**
+  Tasks are chunks of work, such as a feature to add or a cleanup to do.
+* **Issues:**
+  Issues include code bugs, feature requests, documentation, testing, etc.
+  Dealing with an issue may require multiple tasks.
+* **Rules:**
+  Rules are instructions that an AI follows in every session, such as
+  version control or coding rules, which may be shared by several projects.
+  They are discussed in the section about Rules much further below.
 
-Each Item is stored in a dedicated sub-directory (e.g. `TASKS/1.2.3_Title/`)
-with the following information:
-* Title:
-  A short one line description of the item (e.g. `Initialization Fails`.)
-* Number:
-  A unique hierarchical number (e.g. `1.2.3`) giving the Item's place in
-  the tree.  There are never gaps: if `1.3` exists, so do `1.1` and
-  `1.2`.  Items can be created or moved to the next free number of a
-  level, or `before` or `after` an existing Item, and the others are
-  renumbered to make room or close the gap.  Numbers change as Items are
-  created, deleted and moved, so they are never used in text; tags are.
-* Tag:
-  A short name: the capitalized first letter of the collection and a
-  period, then the first letter of each word of the Title in lower case,
-  ignoring "a", "an", "of" and "the" (e.g. `Division by Zero is Bad` in
-  `ISSUES/` is `I.dbzib`.)  Collections must start with different
-  letters.  A tag is unique within its collection; when it would clash,
-  the newer Item gets the lowest free number added (e.g. `I.cde2`.)  A
-  tag never changes on its own, since tags show up in commit messages and
-  the like.  Text refers to Items by tag, never by number, and commands
-  accept a tag wherever they take a Number.
-* Priority:
-  An optional level: 0 (catastrophic), 1 (high), 2 (medium) or 3 (low).
-  Priority is enabled per collection (`ai_contexts i enable priority`);
-  then `ls` shows it and lists Items by priority first.
-* State:
-  The state of the item: Pending, Open, Reference, Suspended, Closed or
-  Rejected (decided against; otherwise treated like Closed).
-  New items start out Pending.  A Reference item is not being worked on,
-  but its `Context.md` is still loaded like an Open item's.  (A rule's
-  state is Active or InActive instead.)
-* `Details.md`:
-  A file edited by a human that textually describes the item.  Its first
-  line is a heading with the Number and Title (e.g. `# 1.2.3 Title`.)
-* `Context.md`:
-  A file managed by an AI LLM that has additional AI context information.
-* `Summary.md`:
-  A short summary of what the Item settled, written by the AI LLM before the
-  Item is closed.  Its first line (``# Summary of `T.fbm` Title``) is kept up
-  to date by `ai_contexts`.
-* `.item.json`:
-  A hidden file managed by `ai_contexts` that holds the State, Tag, Priority,
-  the created and updated times (in UTC), and a history of every State
-  change, and of every transfer to another collection; for a rule, also
-  its source, the SHA-256 of its copy and when the copy was refreshed.
+With `ai_contexts`, you can easily switch your AI's context each time you
+change your development focus, so that it loads only what is relevant.
+This keeps the AI from being distracted by unrelated work and saves both time
+and money.
 
-Every time `ai_contexts` runs, it rewrites `TASKS/Startup.md`.  It contains
-only Claude Code `@` imports: one for the `Details.md` of every Item that is
-not Closed, plus one for the `Context.md` of every Open or Reference Item, for
-every collection (e.g. `@../ISSUES/1_Crash/Details.md`).  Then come the
-`Summary.md` files of the 50 most recently closed Items, newest first (their
-`Details.md` if the summary is still empty), and finally, if there are older
-closed Items, `TASKS/Closed.md`, which `ai_contexts` writes to list them by
-tag and title only.  (The test suite changes the 50 with
-`AI_CONTEXTS_TEST_CLOSED_SUMMARIES`.)  Adding `@TASKS/Startup.md` to
-`CLAUDE.md` loads them at the start of each AI session.  Rules are not in
-`TASKS/Startup.md` (see "Rules Collections".)
+Using `ai_contexts` is simple.  You write a few lines describing a task, and
+the AI does the bookkeeping.  While the task is open, it keeps its working notes
+in the task's directory, and when the task is done, it writes a short
+summary and closes it.  From then on, only that summary is loaded, so a
+long-running project keeps its history without the AI having to wade
+through it.
 
-There is no undo; use a version control system.  Before a move, rename or
-transfer, if the collection has had none for over an hour (the time is kept in
-its `.ai_contexts.json`), `ai_contexts` recommends taking a snapshot first
-(e.g. `git commit`) and asks whether to continue.  The test suite shortens the
-hour with the `AI_CONTEXTS_TEST_MOVE_RENAME_DELAY_SECONDS` environment
-variable.
+## Getting Started
 
-A tag can stand in for its collection: `ai_contexts I.dbzib close` is the same
-as `ai_contexts ISSUES close I.dbzib`.  `ai_contexts t show T.fbm` (or
-`ai_contexts T.fbm show`) shows everything about an Item: its number, tag,
-state, priority, times, state history, directory and `Details.md`.  When a
-rename changes a tag, `ai_contexts` lists the writable `.md` files in the
-project that use the old tag and offers to update them.
+The installation of `ai_contexts` is covered in "Installation" near the
+end of this document.
 
-An Item that belongs in another collection (e.g. a Task that turns out to
-be an Issue) is moved there, with its children, by `ai_contexts t transfer
-T.fbm issues [PLACE]`.  The PLACE is as for `move` (by default the next
-free top-level number), and both collections are renumbered to leave no
-gaps.  The tag gets the new collection's prefix (`T.fbm` becomes `I.fbm`),
-and keeps the rest unless that is taken there (then it gets the lowest
-free number, as for `create`); a transfer back gets the old tag back if it
-is free.  The title, state and its history, priority and files are kept,
-and the transfer is recorded in `.item.json` and shown by `show`.  Old
-tags are not looked up, but, as for a rename, `ai_contexts` offers to
-update every `.md` file that uses them, in one pass.  Items can only be
-transferred between collections of the same type.
+Each category is a collection of Items that lives in its own directory
+(e.g. `TASKS/`, `ISSUES/` and `RULES/`).  A project can have other collections
+as well (e.g. `IDEAS/`), as long as their names start with a unique letter.
 
-`ai_contexts t ls` leaves out Closed Items (unless asked for by number or
-tag) and says how many it left out; `ai_contexts t ls -a` lists them all.
+These directories are manipulated by the `aic` command (which is
+a symbolic link to the `ai_contexts.py` program).  For example:
 
-A renumbering (from a create, delete or move) first writes its plan to a
-hidden `.renumber.json` in the collection, and a transfer writes its plan
-to a hidden `.transfer.json` in the collection it comes from.  If either
-is interrupted, the next `ai_contexts` command finishes it and says so.
-Every command also checks the collections it loads, so nobody has to
-remember to: it fixes what `ai_contexts` maintains (the number in the `# N
-Title` heading of `Details.md`, the heading of `Summary.md`) and reports
-what a person maintains (a missing heading, a title edited so that it no
-longer matches the directory name, two Items with the same tag), saying
-how to fix it.
+* `aic TASKS create` creates the `TASKS/` directory.
+* `aic ISSUES create` creates the `ISSUES/` directory.
 
-Run `ai_contexts` with no arguments to list the collections, one line
-each, and `ai_contexts -h` to list the commands.  `ai_contexts t ls -l`
-also lists the created and updated times in the local time zone.
+Each one asks before creating the directory, and marks it as a collection
+with a hidden `.ai_contexts.json` file inside it.
+
+Next, tell the AI about them.  For Claude Code, add these two lines to
+the project's `CLAUDE.md` file:
+
+```
+@AI_Contexts_Rules.md
+@TASKS/Startup.md
+```
+
+`AI_Contexts_Rules.md` (see "Installation") teaches the AI how to use
+`aic`, and `TASKS/Startup.md`, which `aic` rewrites every time it runs,
+loads the context of your tasks and issues.
+
+To create a task, give it a number and a title:
+
+```
+aic TASKS create 1 Write the README
+```
+
+This creates the `TASKS/1_Write_the_README/` sub-directory.  The first
+task is always number `1`, since numbers never have gaps (see below).
+
+To see the tasks, run `aic TASKS ls`, which shows:
+
+```
+1  Pending    T.wr  Write the README
+```
+
+What you see is:
+
+* **`1`**: This is the task number.
+  (It can be hierarchical; see shortly below.)
+* **`Pending`**: This is the initial task state.
+* **`T.wr`**: This is the task tag.  It is constructed by taking the
+  first letter of the collection name (i.e. `TASKS`) followed by a
+  period.  The rest is constructed by taking the title (see next item),
+  dropping the words "a", "an", "of" and "the", and concatenating the
+  first letter of each remaining word in lower case.  For example,
+  "Write the README" drops "the", leaving **W**rite **R**EADME, so the
+  tag is `T.wr`.
+* **`Write the README`**: The full title is listed last.
+
+Collection and command names can both be shortened to any unique
+prefix, in any case, so `aic t ls` works as well, and `aic t op T.wr` is
+short for `aic TASKS open T.wr`.  (If a prefix is ambiguous, such as `c`
+for `close` or `create`, `aic` lists the choices.)  Tags can not be
+shortened, so `T.wr` must be typed in full (though `t.wr` works too).
+`aic` also works from anywhere inside the project: it looks for the
+collections in the current directory, and then in each parent directory
+in turn.
+
+Numbers are hierarchical, so a task can be broken into smaller ones:
+
+```
+aic t create 1.1 Draft the introduction
+aic t create 2 Publish the README
+```
+
+Then `aic TASKS ls` lists:
+
+```
+1    Pending    T.wr  Write the README
+1.1  Pending    T.di  Draft the introduction
+2    Pending    T.pr  Publish the README
+```
+
+Hierarchical numbers:
+
+* A hierarchical number is a sequence of positive integers separated by `.`
+  (e.g. `1.3.2`.)
+* They can be sorted, but they are never allowed to have gaps.
+  Thus, task `1.3` can only be created after `1.1` and `1.2` exist.
+* They change as tasks are added, moved, inserted and deleted.  This is
+  why tags are typically used instead of hierarchical numbers.
+
+## Context Files
+
+Each created sub-directory contains the following 4 files:
+
+* **`Details.md`**:
+  This file is entirely edited by the User.  It provides the description
+  of the Task/Issue.  For a Task it describes the goal of the task.  For
+  an Issue, it describes the Issue, but not necessarily how to fix it.
+* **`Summary.md`**:
+  This is a file where the AI stores the context it needs once the
+  Task/Issue is closed.
+* **`Context.md`**:
+  This file is where the AI stores the context it needs when working on it.
+  It is allowed to be quite detailed.  However, the AI only sees the context
+  when the task or issue is in the Open (or Reference) state.
+* **`.item.json`**:
+  This is a hidden file entirely managed by `aic` to keep track of things.
+
+At AI startup, the AI is directed to read at most 2 of the 3 files
+above:
+
+* **`Details.md`**: This is read until the Task/Issue is closed.
+* **`Context.md`**: This is read while the Task/Issue is open.
+* **`Summary.md`**: This is read once the Task/Issue is closed.
+
+Thus, the AI gets the context it needs to focus on individual Tasks
+and/or Issues.
+
+Prior to working on a task, first enter its details into `Details.md`,
+then open it:
+
+```
+aic t open T.wr
+```
+
+The next AI session loads its `Details.md` and `Context.md`.  When the
+work is done, ask the AI to close the task: it writes the `Summary.md`
+and it runs the `aic t close T.wr` command for you.  In practice, you rarely
+run `aic` yourself once the collections exist; you ask the AI to create,
+open and close tasks and issues, and it runs the commands.
+
+## States
+
+A task (or issue) is always in one of these states:
+
+* **Pending:** Not started yet.  Every new task starts out Pending.
+* **Open:** Being worked on.  Its `Context.md` is loaded.
+* **Reference:** Not being worked on, but its `Context.md` is still
+  loaded, so its notes stay available.
+* **Suspended:** Put aside for now.
+* **Closed:** Done.  Only its `Summary.md` is loaded.
+* **Rejected:** Decided against.  It is treated like a Closed one.
+
+The commands are named after the states (`pending`, `open`, `reference`,
+`suspend`, `close` and `reject`), e.g. `aic t close T.wr`.  `aic t ls`
+leaves out Closed and Rejected tasks; `aic t ls -a` lists them all.
+
+## Moving Things Around
+
+* `aic t move T.di after 2` moves a task (and its children), and
+  `aic t create before 1 Outline the README` creates one in front of
+  another; the other tasks are renumbered to make room or close the gap.
+* `aic t rename T.di to Draft the overview` changes a title.  If that
+  changes the tag, `ai_contexts` offers to update every `.md` file in the
+  project that uses the old one.
+* `aic t transfer T.di issues` moves a task that turns out to be an issue
+  into `ISSUES/`, where its tag becomes `I.di`.
+* `aic t delete T.di` deletes a task for good.
+
+There is no undo, so keep the collections in a version control system.
+Before a move, rename or transfer, if there has not been one for over an
+hour, `ai_contexts` suggests taking a snapshot (e.g. `git commit`) first.
+
+## Priorities
+
+Issues can be given a priority once it is enabled for the collection
+(`aic i enable priority`): 0 (catastrophic), 1 (high), 2 (medium) or 3
+(low), set with `aic i priority I.dbzib 1`.  `aic i ls` then lists the
+issues by priority first.
+
+## Other Conveniences
+
+* A tag can stand in for its collection: `aic I.dbzib close` is the same
+  as `aic ISSUES close I.dbzib`.
+* `aic T.wr show` shows everything about a task.
+* `aic` with no arguments lists the collections, and `aic -h` lists all
+  of the commands.
+* Every command checks the collections and tells you about anything that
+  needs fixing (such as a title edited by hand), and how to fix it.
 
 ## Rules Collections
 
-A rules collection (e.g. `RULES/`) holds rules that Claude Code should
-load at the start of every session, such as version control or coding
-rules shared by several projects.  The rule files can live anywhere in
-the file system, but Claude Code will not import a file outside the
-project (even through a symbolic link) without approval, so `ai_contexts`
-copies each rule into the project:
+A rules collection (e.g. `RULES/`) holds rules that the AI should load at
+the start of every session, such as version control or coding rules
+shared by several projects.  Each rule is a file that can live anywhere,
+and `ai_contexts` keeps a read-only copy of it in the project (the AI may
+not import a file from outside the project without approval):
 
-    ai_contexts RULES create
-    ai_contexts r type rules
-    ai_contexts r create 1 ../claude_code_rules/*.md
-    ai_contexts r activate R.vcr
+```
+aic RULES create
+aic r type rules
+aic r create 1 ../claude_code_rules/*.md
+aic r activate R.vcr
+```
 
-`create PLACE FILE...` makes one rule from each file (or glob pattern), at
-PLACE and then after it, titled from the file name
-(`Version_Control_Rules.md` is "Version Control Rules").  Each rule
-directory holds a `Details.md` (why the project uses the rule; it is not
-loaded), the `.item.json` and a read-only copy of the source file with the
-same name (e.g.
-`RULES/1_Version_Control_Rules/Version_Control_Rules.md`).  The source is
-kept relative to the directory that holds the collections, with its
-directories resolved to real ones; `ai_contexts r source R.vcr FILE`
-changes it.
+A new rule is InActive until it is activated.  Every time `ai_contexts`
+runs, it refreshes the copies from their source files and rewrites
+`RULES/Active_Rules.md` to import the Active ones, so adding this line to
+`CLAUDE.md` loads them:
 
-A new rule is InActive; `activate` (which needs a copy) and `deactivate` change
-that.  Every time `ai_contexts` runs, it rewrites `RULES/Active_Rules.md` with
-an `@` import of the copy of every Active rule, in number order, so adding
-`@RULES/Active_Rules.md` to `CLAUDE.md` loads them.
+```
+@RULES/Active_Rules.md
+```
 
-Every run also refreshes the copies.  A copy that matches its source is
-left alone; a changed source is copied again (to a temporary file that
-then replaces the copy) and its SHA-256 is recorded.  A copy whose SHA-256
-is no longer the recorded one was edited in place: it is reported and
-kept, and `ai_contexts r refresh R.vcr` replaces it after asking.  A missing
-source is reported, and the last copy is kept.  The copies are small and
-are meant to be kept in version control, so a change to a shared rule
-shows up as a diff in each project that uses it.
+## Installation
 
-A rule must stand alone, so every run also reports a rule with no source,
-an Active rule with no copy, an `@` import of a file in a copy (outside
-code spans and blocks, relative to the source), and a copy that is the
-same as a file that `CLAUDE.md` imports directly (the same rule loaded
-twice).
+`ai_contexts` is a single Python program, `ai_contexts.py`, that needs
+Python 3.11 or later and nothing beyond the standard library.  To install
+it:
+
+1. Copy `ai_contexts.py` into a directory on your `PATH`, and make a
+   symbolic link to it named `aic`:
+
+   ```
+   cp ai_contexts.py ~/bin/
+   ln -s ai_contexts.py ~/bin/aic
+   ```
+
+2. Copy `AI_Contexts_Rules.md` into each project that uses `aic` (or
+   make it a rule; see "Rules Collections").
+3. Create the collections and set up `CLAUDE.md` as described in
+   "Getting Started".
+
+`REFERENCE.md` has the details of how `ai_contexts` works.
