@@ -12,7 +12,7 @@ import string
 import sys
 import time
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -146,29 +146,40 @@ RULE_STATES: tuple[str, ...] = ("Active", "InActive")
 
 
 # Class `CollectionType`:
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class CollectionType:
     """How the items of one type of collection behave.
 
-    `states` are the item states, `new_state` the state of a new item,
-    `finished_states` the ones that `ls` leaves out and `Startup.md` only
-    summarizes, and `context_states` the ones whose `Context.md` is in
-    `Startup.md`.  `state_commands` gives the state that each state command
-    sets, and `commands` are its other commands.  `files` are the Markdown
-    files of each item, and `in_startup` says whether `Startup.md` imports
-    them at all.  If `has_sources`, each item is a copy of a source file
-    (see `Items.check_rules()`).
+    Attributes:
+    * `states` (`tuple[str, ...]`): The item states.
+    * `new_state` (`str`): The state of a new item.
+    * `finished_states` (`tuple[str, ...]`): The states that `ls` leaves
+      out and `Startup.md` only summarizes.
+    * `context_states` (`tuple[str, ...]`): The states whose
+      `Context.md` is in `Startup.md`.
+    * `state_commands` (`dict[str, str]`): The state that each state
+      command sets.
+    * `commands` (`tuple[str, ...]`): The type's other commands.
+    * `files` (`tuple[str, ...]`): The Markdown files of each item.
+    * `in_startup` (`bool`): True if `Startup.md` imports the files.
+    * `has_sources` (`bool`): True if each item is a copy of a source
+      file (see `Items.check_rules()`).
+
+    Constructor:
+    * `CollectionType(states, new_state, finished_states, context_states,
+      state_commands, commands, files, in_startup, has_sources)`
     """
 
-    states: tuple[str, ...]
-    new_state: str
-    finished_states: tuple[str, ...]
-    context_states: tuple[str, ...]
-    state_commands: dict[str, str]
-    commands: tuple[str, ...]
-    files: tuple[str, ...]
-    in_startup: bool
-    has_sources: bool
+    # Constructor arguments:
+    states: tuple[str, ...] = field(init=True)
+    new_state: str = field(init=True)
+    finished_states: tuple[str, ...] = field(init=True)
+    context_states: tuple[str, ...] = field(init=True)
+    state_commands: dict[str, str] = field(init=True)
+    commands: tuple[str, ...] = field(init=True)
+    files: tuple[str, ...] = field(init=True)
+    in_startup: bool = field(init=True)
+    has_sources: bool = field(init=True)
 
 
 # The types of collection, by the name kept in `.ai_contexts.json`.  A
@@ -370,7 +381,11 @@ COMMANDS: dict[str, str] = {
 
 # Class `RenumberInterrupted`:
 class RenumberInterrupted(Exception):
-    """A renumbering interrupted by the test suite (`INTERRUPT_VARIABLE`)."""
+    """A renumbering interrupted by the test suite (`INTERRUPT_VARIABLE`).
+
+    Attributes:
+    * None beyond those of `Exception`.
+    """
 
 
 # Function `read_file()`:
@@ -842,18 +857,34 @@ def parse_recursive(
 
 
 # Class `Item`:
-@dataclass
+@dataclass(slots=True)
 class Item:
-    """A single item."""
+    """A single item.
 
-    name: tuple[int, ...]
-    title: str
-    state: str = "Pending"
-    created: str = ""
-    updated: str = ""
-    tag: str = ""
-    priority: int | None = None
-    source: str = ""
+    Attributes:
+    * `name` (`tuple[int, ...]`): The item's number, like `(1, 2, 3)`.
+    * `title` (`str`): The one line title.
+    * `state` (`str`): The item's state, like "Open".
+    * `created` (`str`): When the item was created (UTC), or "".
+    * `updated` (`str`): When the item was last updated (UTC), or "".
+    * `tag` (`str`): The tag without its collection prefix, or "".
+    * `priority` (`int | None`): The priority from 0 to 3, or `None`
+      for none.
+    * `source` (`str`): The source file of a rule, or "".
+
+    Constructor:
+    * `Item(name, title, state, created, updated, tag, priority, source)`
+    """
+
+    # Constructor arguments:
+    name: tuple[int, ...] = field(init=True)
+    title: str = field(init=True)
+    state: str = field(init=True, default="Pending")
+    created: str = field(init=True, default="")
+    updated: str = field(init=True, default="")
+    tag: str = field(init=True, default="")
+    priority: int | None = field(init=True, default=None)
+    source: str = field(init=True, default="")
 
     # Method `Item.__post_init__()`:
     def __post_init__(self) -> None:
@@ -892,7 +923,17 @@ class Item:
 
 # Class `Items`:
 class Items:
-    """A collection of items."""
+    """A collection of items.
+
+    Attributes:
+    * `items_directory` (`Path`): The collection's directory.
+    * `items` (`dict[tuple[int, ...], Item]`): The items, by number.
+    * `directories` (`dict[tuple[int, ...], Path]`): The directory of
+      each item, by number.
+    * `error` (`str`): Why the collection can not be used, or "".
+    * `settings` (`dict[str, object]`): The settings from
+      `.ai_contexts.json`.
+    """
 
     # Method `Items.__init__()`:
     def __init__(self, items_directory: Path) -> None:
