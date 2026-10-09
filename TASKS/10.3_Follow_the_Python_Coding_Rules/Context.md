@@ -22,3 +22,15 @@ not ones caught inside).  Written by hand in batches and applied with an
 `ast`-based script that rewraps each docstring to 72 columns; every new
 docstring line is 72 or fewer, so step 4 is left with comments, the
 module docstrings and anything else over 72.
+Step 4 done: every comment and docstring line is 72 or fewer (comment
+blocks rewrapped by script; the module docstring got a paragraph).  The
+`HELP` string is user-visible text, not a docstring, so it stays at 79.
+Step 5 done.  Type hints: every first binding in both files has one
+(186 lines, types from `dmypy inspect`, one declaration per name per
+scope since mypy rejects a second); `_`, comprehension variables and
+`except ... as` names can not be annotated.  `Check` is a `TypeAlias`.
+Block comments: `ai_contexts.py` only (the user is excluding test suites
+from `R.pcr`); 295 comments, each block after the first preceded by a
+blank line; existing body comments kept as block comments.  Two
+docstring summaries that wrapped (`Items.root`,
+`Items.update_references`) were shortened to one line.
