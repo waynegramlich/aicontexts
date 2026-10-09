@@ -126,7 +126,12 @@ When priority is enabled for a collection, its items are listed by
 priority first (0 to 3, then none) and the priority is shown."""
 
 STATES: tuple[str, ...] = (
-    "Pending", "Open", "Reference", "Suspended", "Closed", "Rejected"
+    "Pending",
+    "Open",
+    "Reference",
+    "Suspended",
+    "Closed",
+    "Rejected",
 )
 
 # The states of finished items, which `ls` leaves out and `Startup.md`
@@ -274,8 +279,15 @@ INTERRUPT_VARIABLE: str = "AI_CONTEXTS_TEST_RENUMBER_INTERRUPT"
 # COMMAND ...` can be used.
 TAG_COMMANDS: frozenset[str] = frozenset(
     {
-        "rename", "delete", "list", "show", "priority", "move", "transfer",
-        *STATE_COMMANDS, *TYPE_COMMANDS,
+        "rename",
+        "delete",
+        "list",
+        "show",
+        "priority",
+        "move",
+        "transfer",
+        *STATE_COMMANDS,
+        *TYPE_COMMANDS,
     }
 )
 
@@ -292,13 +304,25 @@ TRANSFER_FILE: str = ".transfer.json"
 
 # The keys of each item in `.transfer.json`.
 TRANSFER_KEYS: tuple[str, ...] = (
-    "old", "temporary", "new", "old_number", "new_number", "tag",
-    "old_tag", "new_tag", "title", "summary",
+    "old",
+    "temporary",
+    "new",
+    "old_number",
+    "new_number",
+    "tag",
+    "old_tag",
+    "new_tag",
+    "title",
+    "summary",
 )
 
 # The keys of each rename in `.renumber.json`.
 RENAME_KEYS: tuple[str, ...] = (
-    "old", "temporary", "new", "old_number", "new_number"
+    "old",
+    "temporary",
+    "new",
+    "old_number",
+    "new_number",
 )
 
 # The collection that holds `Startup.md` for all of the collections.
@@ -1133,7 +1157,7 @@ class Items:
                 continue
             prefix: str = f"# {number} "
             if heading.startswith(prefix):
-                title = heading[len(prefix):].strip()
+                title = heading[len(prefix) :].strip()
             states: tuple[str, ...] = self.collection_type.states
             if state not in states:
                 print(
@@ -1360,9 +1384,10 @@ class Items:
                         f"'# {item.number} TITLE' heading; `ai_contexts "
                         f"{self.prefix}{item.tag} rename to TITLE` adds one"
                     )
-                if clean_title(item.title) != item_directory.name.partition(
-                    "_"
-                )[2]:
+                if (
+                    clean_title(item.title)
+                    != item_directory.name.partition("_")[2]
+                ):
                     messages.append(
                         f"{where}: its directory name does not match its "
                         f"title '{item.title}'; `ai_contexts "
@@ -1484,14 +1509,13 @@ class Items:
         try:
             metadata: dict[str, object] = read_item(item_directory)
             recorded: str = str(metadata.get("sha256", ""))
-            copy_hash: str = (
-                sha256_of(copy_path) if copy_path.exists() else ""
-            )
+            copy_hash: str = sha256_of(copy_path) if copy_path.exists() else ""
             source: bytes = (
                 source_path.read_bytes() if source_path.is_file() else b""
             )
             source_hash: str = (
-                hashlib.sha256(source).hexdigest() if source_path.is_file()
+                hashlib.sha256(source).hexdigest()
+                if source_path.is_file()
                 else ""
             )
             if copy_hash and copy_hash == source_hash:
@@ -1714,9 +1738,7 @@ class Items:
                 write_file(
                     item_directory / "Context.md", "# LLM Agent Context Log\n"
                 )
-            write_file(
-                item_directory / "Details.md", f"# {number} {title}\n"
-            )
+            write_file(item_directory / "Details.md", f"# {number} {title}\n")
             if self.has_file("Summary.md"):
                 write_summary_heading(
                     item_directory,
@@ -2080,7 +2102,7 @@ class Items:
                 item,
                 first_name[:-1]
                 + (first_name[-1] + index,)
-                + item.name[len(name):],
+                + item.name[len(name) :],
             )
             for index, name in enumerate(names)
             for item in self.list_items(name)
@@ -2236,9 +2258,11 @@ class Items:
             return f"'{path}' is not a file"
         if path.name in RESERVED_NAMES or path.name.startswith("."):
             return f"A source can not be named '{path.name}'"
-        source: str = Path(
-            os.path.relpath(path.absolute().parent.resolve(), self.root)
-        ).joinpath(path.name).as_posix()
+        source: str = (
+            Path(os.path.relpath(path.absolute().parent.resolve(), self.root))
+            .joinpath(path.name)
+            .as_posix()
+        )
         item_directory: Path = self.directories[name]
         try:
             if item.source:
@@ -2249,8 +2273,7 @@ class Items:
             )
         except (OSError, ValueError) as error:
             return (
-                f"Unable to set the source of {self.prefix}{item.tag}: "
-                f"{error}"
+                f"Unable to set the source of {self.prefix}{item.tag}: {error}"
             )
         item.source = source
         message: str = self.refresh_rule(item, force=True)
@@ -2528,9 +2551,7 @@ class Items:
         word: str = (
             arguments[-1]
             if len(arguments) > 2
-            else str(
-                sum(1 for name in target.items if len(name) == 1) + 1
-            )
+            else str(sum(1 for name in target.items if len(name) == 1) + 1)
         )
         checked: tuple[int, ...] | str = self.check_transfer(
             names, target, place, word
@@ -2562,8 +2583,7 @@ class Items:
             renumbered: dict[str, Item] = {
                 before[id(item)][0]: item
                 for item in collection.list_items()
-                if id(item) not in moved
-                and before[id(item)][0] != item.number
+                if id(item) not in moved and before[id(item)][0] != item.number
             }
             if renumbered:
                 print(f"In {collection.items_directory.name}:")
@@ -2604,8 +2624,7 @@ class Items:
         ]
         if self.priority_enabled:
             lines.append(
-                "Priority:  "
-                f"{'-' if item.priority is None else item.priority}"
+                f"Priority:  {'-' if item.priority is None else item.priority}"
             )
         if self.collection_type.has_sources:
             lines += [
@@ -2647,9 +2666,7 @@ class Items:
         """Print the `renumbered` items, keyed by their old numbers."""
         if renumbered:
             print("Renumbered (old number first):")
-            self.show(
-                list(renumbered.values()), old_numbers=list(renumbered)
-            )
+            self.show(list(renumbered.values()), old_numbers=list(renumbered))
 
     # Method `Items.list_command()`:
     def list_command(self, arguments: list[str]) -> str:
@@ -2926,9 +2943,7 @@ class Items:
         number_width: int = len(str(len(directories)))
         for number, directory in enumerate(directories, 1):
             items: Items = Items(directory)
-            states: list[str] = [
-                item.state for item in items.items.values()
-            ]
+            states: list[str] = [item.state for item in items.items.values()]
             counts: list[str] = [
                 f"{states.count(state)} {state}"
                 for state in ALL_STATES
@@ -3221,7 +3236,7 @@ def do_transfer(directory: Path, plan: dict[str, object], phase: int) -> str:
             if details.startswith(prefix):
                 write_file(
                     details_path,
-                    f"# {item['new_number']} {details[len(prefix):]}",
+                    f"# {item['new_number']} {details[len(prefix) :]}",
                 )
             if item["summary"]:
                 write_summary_heading(
@@ -3340,20 +3355,19 @@ def do_renumber(
     try:
         write_file(
             marker,
-            json.dumps({"phase": phase, "renames": renames}, indent=2)
-            + "\n",
+            json.dumps({"phase": phase, "renames": renames}, indent=2) + "\n",
         )
         if phase == 1:
             for rename in renames:
-                if path(rename, "old").exists() and not path(
-                    rename, "temporary"
-                ).exists():
+                if (
+                    path(rename, "old").exists()
+                    and not path(rename, "temporary").exists()
+                ):
                     step()
                     path(rename, "old").rename(path(rename, "temporary"))
             write_file(
                 marker,
-                json.dumps({"phase": 2, "renames": renames}, indent=2)
-                + "\n",
+                json.dumps({"phase": 2, "renames": renames}, indent=2) + "\n",
             )
         for rename in renames:
             if path(rename, "temporary").exists():
@@ -3367,14 +3381,11 @@ def do_renumber(
                 step()
                 write_file(
                     details_path,
-                    f"# {rename['new_number']} {details[len(prefix):]}",
+                    f"# {rename['new_number']} {details[len(prefix) :]}",
                 )
         marker.unlink()
     except OSError as error:
-        return (
-            f"Unable to renumber items in '{directory}': "
-            f"{error}"
-        )
+        return f"Unable to renumber items in '{directory}': {error}"
     return ""
 
 
@@ -3468,8 +3479,7 @@ def print_items(
     old_width: int = max((len(old) for old in old_numbers or []), default=0)
     width: int = max((len(item.number) for item in items), default=0)
     tags: dict[tuple[int, ...], str] = {
-        item.name: f"{prefix}{item.tag}" if item.tag else ""
-        for item in items
+        item.name: f"{prefix}{item.tag}" if item.tag else "" for item in items
     }
     tag_width: int = max((len(tag) for tag in tags.values()), default=0)
     state_width: int = max(len(state) for state in ALL_STATES)
@@ -3487,11 +3497,7 @@ def print_items(
             else ""
         )
         print(
-            (
-                f"{old_numbers[index]:<{old_width}} -> "
-                if old_numbers
-                else ""
-            )
+            (f"{old_numbers[index]:<{old_width}} -> " if old_numbers else "")
             + f"{item.number:<{width}}  "
             f"{item.state:<{state_width}}  "
             f"{levels}{tags[item.name]:<{tag_width}}  {times}{item.title}"

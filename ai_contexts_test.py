@@ -126,8 +126,12 @@ def _test_parsing(check: Check) -> None:
         )
     names: list[str] = ["TASKS", "Tools", "ISSUES"]
     for word, matched in (
-        ("t", ["TASKS", "Tools"]), ("TA", ["TASKS"]), ("i", ["ISSUES"]),
-        ("x", []), ("", names), ("tasks", ["TASKS"]),
+        ("t", ["TASKS", "Tools"]),
+        ("TA", ["TASKS"]),
+        ("i", ["ISSUES"]),
+        ("x", []),
+        ("", names),
+        ("tasks", ["TASKS"]),
     ):
         check(matches(word, names) == matched, f"matches({word!r})")
     check(
@@ -153,9 +157,7 @@ def _test_parsing(check: Check) -> None:
     for base, used, tag in unique_cases:
         check(unique_tag(base, used) == tag, f"unique_tag {used}")
     for level, priority in (("0", 0), ("3", 3), ("-", None)):
-        check(
-            parse_priority(level) == priority, f"parse_priority({level})"
-        )
+        check(parse_priority(level) == priority, f"parse_priority({level})")
     for level in ("4", "-1", "x", "", "1.0"):
         check(
             isinstance(parse_priority(level), str),
@@ -170,15 +172,16 @@ def _test_parsing(check: Check) -> None:
         print_items(printed)
         print_items(printed, priority=True, prefix="I.")
     check(
-        output.getvalue()
-        == "1    Pending    cde  Can Dogs Eat\n"
+        output.getvalue() == "1    Pending    cde  Can Dogs Eat\n"
         "1.2  Reference  x    X\n"
         "1    Pending    0  I.cde  Can Dogs Eat\n"
         "1.2  Reference  -  I.x    X\n",
         "print_items shows the tag, and the priority if asked",
     )
     for collection_name, prefix in (
-        ("TASKS", "T."), ("issues", "I."), ("2026", "2.")
+        ("TASKS", "T."),
+        ("issues", "I."),
+        ("2026", "2."),
     ):
         check(
             tag_prefix(collection_name) == prefix,
@@ -187,8 +190,7 @@ def _test_parsing(check: Check) -> None:
     check(utc_stamp(0) == "1970-01-01T00:00:00Z", "utc_stamp")
     epoch: datetime = datetime.fromtimestamp(0, UTC).astimezone()
     check(
-        local_time("1970-01-01T00:00:00Z")
-        == epoch.strftime("%Y-%m-%d %H:%M"),
+        local_time("1970-01-01T00:00:00Z") == epoch.strftime("%Y-%m-%d %H:%M"),
         "local_time",
     )
     for stamp, shown in (("", "-"), ("junk", "?"), ("2026-01-01", "?")):
@@ -198,8 +200,12 @@ def _test_parsing(check: Check) -> None:
     for state in STATES:
         check(Item((1,), "p", state).state == state, f"{state} ok")
     bad_items: list[tuple[object, str]] = [
-        ((), "Open"), ((0,), "Open"), ((True,), "Open"),
-        ((1, "2"), "Open"), ([1], "Open"), ((1,), "Done"),
+        ((), "Open"),
+        ((0,), "Open"),
+        ((True,), "Open"),
+        ((1, "2"), "Open"),
+        ([1], "Open"),
+        ((1,), "Done"),
     ]
     for name, state in bad_items:
         try:
@@ -246,12 +252,9 @@ def _test_items(check: Check, directory: Path) -> None:
     top: Path = directory / "1_Top_item"
     metadata: dict[str, object] = read_item(top)
     check(
-        read_file(top / ITEM_FILE).startswith(
-            '{\n  "state": "Pending",\n'
-        )
+        read_file(top / ITEM_FILE).startswith('{\n  "state": "Pending",\n')
         and isinstance(item, Item)
-        and metadata
-        == {**new_metadata("Pending", item.created), "tag": "ti"}
+        and metadata == {**new_metadata("Pending", item.created), "tag": "ti"}
         and local_time(item.created) not in ("-", "?"),
         "item file",
     )
@@ -271,9 +274,15 @@ def _test_items(check: Check, directory: Path) -> None:
     for number in ("2", "1.2", "1.1.1", "1.1.2"):
         items.create_item(number, f"item {number}")
     for number, title in (
-        ("1.1", "duplicate"), ("01.1", "duplicate"),
-        ("x", "bad"), ("3", "  ...!! "), ("3", ""), ("4", "gap"),
-        ("1.4", "gap"), ("1.1.4", "gap"), ("3.1", "no parent"),
+        ("1.1", "duplicate"),
+        ("01.1", "duplicate"),
+        ("x", "bad"),
+        ("3", "  ...!! "),
+        ("3", ""),
+        ("4", "gap"),
+        ("1.4", "gap"),
+        ("1.1.4", "gap"),
+        ("3.1", "no parent"),
     ):
         check(
             isinstance(items.create_item(number, title), str),
@@ -294,9 +303,7 @@ def _test_items(check: Check, directory: Path) -> None:
 
 
 # Function `_test_list_and_state()`:
-def _test_list_and_state(
-    check: Check, items: Items, directory: Path
-) -> None:
+def _test_list_and_state(check: Check, items: Items, directory: Path) -> None:
     """Test `list_items()`, `set_state()` and `write_startup()`."""
 
     def numbers(listed: list[Item] | str) -> list[str]:
@@ -310,8 +317,7 @@ def _test_list_and_state(
         "list all items in order",
     )
     check(
-        numbers(items.list_items((1, 1)))
-        == ["1.1", "1.1.1", "1.1.2"],
+        numbers(items.list_items((1, 1))) == ["1.1", "1.1.1", "1.1.2"],
         "list 1.1 and its children",
     )
     check(items.list_items((9,)) == [], "list with no matches")
@@ -320,13 +326,10 @@ def _test_list_and_state(
         "close 1.1",
     )
     check(
-        read_item(directory / "1.1_Fix_the_bug_now")["state"]
-        == "Closed",
+        read_item(directory / "1.1_Fix_the_bug_now")["state"] == "Closed",
         "close 1.1 writes item file",
     )
-    history: object = read_item(directory / "1.1_Fix_the_bug_now")[
-        "history"
-    ]
+    history: object = read_item(directory / "1.1_Fix_the_bug_now")["history"]
     check(
         isinstance(history, list)
         and [change["state"] for change in history]
@@ -341,7 +344,8 @@ def _test_list_and_state(
     )
     check(items.items[(1, 2)].state == "Open", "1.2 still Open")
     for name, state, recursive in (
-        ((9,), "Closed", False), ((9,), "Closed", True),
+        ((9,), "Closed", False),
+        ((9,), "Closed", True),
         ((1,), "Done", False),
     ):
         check(
@@ -382,9 +386,7 @@ def _test_reload(check: Check, directory: Path) -> None:
     bad_state.mkdir()
     write_item(bad_state, {"state": "Done"})
     write_file(bad_state / "Details.md", "# 5 Bad state\n")
-    for directory_name, text in (
-        ("6_Bad_json", "{"), ("7_Not_object", "[]")
-    ):
+    for directory_name, text in (("6_Bad_json", "{"), ("7_Not_object", "[]")):
         (directory / directory_name).mkdir()
         write_file(directory / directory_name / ITEM_FILE, text)
         write_file(directory / directory_name / "Details.md", "# x\n")
@@ -451,9 +453,7 @@ def _test_reload(check: Check, directory: Path) -> None:
 def _test_rename_delete(check: Check, directory: Path) -> None:
     """Test `rename_item()` and `delete_items()`."""
     items: Items = Items(directory)
-    for number, title in (
-        ("1", "One"), ("1.1", "Child"), ("2", "Two")
-    ):
+    for number, title in (("1", "One"), ("1.1", "Child"), ("2", "Two")):
         items.create_item(number, title)
     write_item(directory / "1_One", {"state": "Open", "updated": "x"})
     renamed: Item | str = items.rename_item((1,), " Uno, again ")
@@ -479,7 +479,8 @@ def _test_rename_delete(check: Check, directory: Path) -> None:
         "rename sets the updated time",
     )
     for number, title in (
-        ("3", "Can Dogs Eat"), ("4", "Caffeine Drink Elixir"),
+        ("3", "Can Dogs Eat"),
+        ("4", "Caffeine Drink Elixir"),
         ("5", "Hot Tub"),
     ):
         items.create_item(number, title)
@@ -497,16 +498,14 @@ def _test_rename_delete(check: Check, directory: Path) -> None:
         "rename makes a new unique tag",
     )
     check(
-        [item.tag for item in Items(directory).list_items((3,))]
-        == ["ht2"],
+        [item.tag for item in Items(directory).list_items((3,))] == ["ht2"],
         "reload a tag",
     )
     items.delete_items([(3,), (4,), (5,)])
     write_file(directory / "2_Two" / "Details.md", "Notes\n")
     items.rename_item((2,), "Two")
     check(
-        read_file(directory / "2_Two" / "Details.md")
-        == "# 2 Two\nNotes\n",
+        read_file(directory / "2_Two" / "Details.md") == "# 2 Two\nNotes\n",
         "rename adds a missing Details.md heading",
     )
     (directory / "2_Taken").mkdir()
@@ -536,8 +535,8 @@ def _test_rename_delete(check: Check, directory: Path) -> None:
         questions.append(question)
         return "y"
 
-    result: tuple[list[Item], dict[str, Item]] | str = (
-        items.delete_items([(1,)], True, yes)
+    result: tuple[list[Item], dict[str, Item]] | str = items.delete_items(
+        [(1,)], True, yes
     )
     check(
         not isinstance(result, str)
@@ -592,14 +591,18 @@ def _test_numbering(check: Check, directory: Path) -> None:
     for part in range(1, 12):
         items.create_item(str(part), f"Top {part}")
     check(
-        [item.number for item in items.list_items()][8:]
-        == ["9", "10", "11"],
+        [item.number for item in items.list_items()][8:] == ["9", "10", "11"],
         "list in numeric order",
     )
     items.delete_items([(part,) for part in range(4, 12)])
     for number, title in (
-        ("1.1", "B"), ("1.2", "C"), ("1.2.1", "D"), ("1.3", "E"),
-        ("1.3.1", "F"), ("1.4", "G"), ("1.5", "H"),
+        ("1.1", "B"),
+        ("1.2", "C"),
+        ("1.2.1", "D"),
+        ("1.3", "E"),
+        ("1.3.1", "F"),
+        ("1.4", "G"),
+        ("1.5", "H"),
     ):
         items.create_item(number, title)
 
@@ -609,29 +612,39 @@ def _test_numbering(check: Check, directory: Path) -> None:
             for item in Items(directory).list_items((1,))
         ]
 
-    result: tuple[list[Item], dict[str, Item]] | str = (
-        items.delete_items([(1, 1)])
+    result: tuple[list[Item], dict[str, Item]] | str = items.delete_items(
+        [(1, 1)]
     )
     check(
         not isinstance(result, str)
         and [item.title for item in result[0]] == ["B"]
         and {old: item.number for old, item in result[1].items()}
         == {
-            "1.2": "1.1", "1.2.1": "1.1.1", "1.3": "1.2",
-            "1.3.1": "1.2.1", "1.4": "1.3", "1.5": "1.4",
+            "1.2": "1.1",
+            "1.2.1": "1.1.1",
+            "1.3": "1.2",
+            "1.3.1": "1.2.1",
+            "1.4": "1.3",
+            "1.5": "1.4",
         }
         and tree()
         == [
-            "1 Top 1", "1.1 C", "1.1.1 D", "1.2 E", "1.2.1 F", "1.3 G",
+            "1 Top 1",
+            "1.1 C",
+            "1.1.1 D",
+            "1.2 E",
+            "1.2.1 F",
+            "1.3 G",
             "1.4 H",
         ]
-        and read_file(directory / "1.2.1_F" / "Details.md")
-        == "# 1.2.1 F\n",
+        and read_file(directory / "1.2.1_F" / "Details.md") == "# 1.2.1 F\n",
         "delete 1.1 renumbers the later items and their children",
     )
     for word, message in (
-        ("1.3-2", "Invalid range"), ("1.3-x", "Invalid range"),
-        ("x-4", "Invalid item number"), ("1.3-9", "'1.5' does not exist"),
+        ("1.3-2", "Invalid range"),
+        ("1.3-x", "Invalid range"),
+        ("x-4", "Invalid item number"),
+        ("1.3-9", "'1.5' does not exist"),
     ):
         check(
             message in str(items.resolve_range(word)),
@@ -678,7 +691,11 @@ def _test_moving(check: Check, directory: Path) -> None:
     """Test creating at a place and moving."""
     items: Items = Items(directory)
     for number, title in (
-        ("1", "A"), ("1.1", "B"), ("1.2", "C"), ("2", "D"), ("2.1", "E")
+        ("1", "A"),
+        ("1.1", "B"),
+        ("1.2", "C"),
+        ("2", "D"),
+        ("2.1", "E"),
     ):
         items.create_item(number, title)
 
@@ -759,7 +776,9 @@ def _test_recovery(check: Check, directory: Path) -> None:
         items: Items = Items(collection)
         # Same titles, so new directory names are old ones.
         for number, title in (
-            ("1", "Notes"), ("1.1", "Child"), ("2", "Notes")
+            ("1", "Notes"),
+            ("1.1", "Child"),
+            ("2", "Notes"),
         ):
             items.create_item(number, title)
         os.environ[INTERRUPT_VARIABLE] = str(limit)
@@ -813,7 +832,10 @@ def _test_references(check: Check, directory: Path) -> None:
     items.create_item("1", "Fix Big Mistake")
     text: str = "See T.fbm, T.fbm2, XT.fbm and `T.fbm`.\n"
     for relative in (
-        "notes.md", "sub/deep.md", ".hidden/skipped.md", "other.txt"
+        "notes.md",
+        "sub/deep.md",
+        ".hidden/skipped.md",
+        "other.txt",
     ):
         (directory / relative).parent.mkdir(exist_ok=True)
         write_file(directory / relative, text)
@@ -881,9 +903,8 @@ def _test_references(check: Check, directory: Path) -> None:
     write_file(directory / "notes.md", "T.fbm\n")
     with contextlib.redirect_stdout(io.StringIO()):
         check(
-            "Unable to update" in items.rename_command(
-                ["1", "to", "Good", "Fix"], refuse_writes
-            ),
+            "Unable to update"
+            in items.rename_command(["1", "to", "Good", "Fix"], refuse_writes),
             "report a reference that can not be updated",
         )
 
@@ -895,7 +916,10 @@ def _test_closed(check: Check, directory: Path) -> None:
     tasks: Items = Items(directory / "TASKS")
     issues: Items = Items(directory / "ISSUES")
     for number, title in (
-        ("1", "Alpha"), ("2", "Beta"), ("3", "Gamma"), ("4", "Delta")
+        ("1", "Alpha"),
+        ("2", "Beta"),
+        ("3", "Gamma"),
+        ("4", "Delta"),
     ):
         tasks.create_item(number, title)
     issues.create_item("1", "Crash")
@@ -917,16 +941,16 @@ def _test_closed(check: Check, directory: Path) -> None:
     )
     # Closed in this order, a day apart.
     for collection, name, date in (
-        (tasks, (4,), 1), (tasks, (2,), 2), (issues, (1,), 3),
+        (tasks, (4,), 1),
+        (tasks, (2,), 2),
+        (issues, (1,), 3),
         (tasks, (1,), 4),
     ):
         # The issue is Rejected, which counts as finished too.
         collection.set_state(
             name, "Rejected" if collection is issues else "Closed"
         )
-        metadata: dict[str, object] = read_item(
-            collection.directories[name]
-        )
+        metadata: dict[str, object] = read_item(collection.directories[name])
         history: object = metadata["history"]
         if isinstance(history, list):
             history[-1]["time"] = f"2026-10-0{date}T12:00:00Z"
@@ -1055,8 +1079,7 @@ def _test_checks(check: Check, directory: Path) -> None:
     write_item(items.directories[(3,)], {**metadata, "tag": "a"})
     loaded, messages = load()
     check(
-        read_file(items.directories[(1,)] / "Details.md")
-        == "# 1 A\nText.\n"
+        read_file(items.directories[(1,)] / "Details.md") == "# 1 A\nText.\n"
         and "Fixed the item number in the heading of" in messages
         and loaded.items[(1,)].title == "A",
         "fix a wrong number in a Details.md heading",
@@ -1160,15 +1183,13 @@ def _test_write_failures(check: Check, directory: Path) -> None:
     move: Items = collection("move")
     (move.directories[(2,)] / "Details.md").chmod(0o400)
     check(
-        "Unable to renumber"
-        in str(move.move_items([(1,)], "after", (2,))),
+        "Unable to renumber" in str(move.move_items([(1,)], "after", (2,))),
         "move can not renumber",
     )
     create: Items = collection("create")
     (create.directories[(1,)] / "Details.md").chmod(0o400)
     check(
-        "Unable to renumber"
-        in str(create.create_item("1", "N", "before")),
+        "Unable to renumber" in str(create.create_item("1", "N", "before")),
         "create before can not renumber",
     )
 
@@ -1511,9 +1532,8 @@ def _test_commands(check: Check, directory: Path) -> None:
             check(
                 code == 0
                 and "No write access" in text
-                and "@1_An_item/" in read_file(
-                    directory / "TASKS" / "Startup.md"
-                ),
+                and "@1_An_item/"
+                in read_file(directory / "TASKS" / "Startup.md"),
                 "create a collection with a read-only TASKS",
             )
         finally:
@@ -1904,12 +1924,9 @@ def _test_rules(check: Check, directory: Path) -> None:
             and read_file(active) == "@2_Alpha_Rule/Alpha_Rule.md\n",
             "an Active rule without a copy",
         )
+        check(run("r", "refresh", "1")[0] == 1, "refresh a missing source")
         check(
-            run("r", "refresh", "1")[0] == 1, "refresh a missing source"
-        )
-        check(
-            "has no copy of a source to make Active"
-            in run("r", "act", "1")[1]
+            "has no copy of a source to make Active" in run("r", "act", "1")[1]
             and run("r", "deact", "1")[0] == 0,
             "only a rule with a copy can be made Active",
         )
@@ -2189,14 +2206,19 @@ def _test_transfer_failures(
         check(
             code == 0
             and "Finished an interrupted transfer from 'TASKS' to "
-            f"'ISSUES': {finished}\n" in output,
+            f"'ISSUES': {finished}\n"
+            in output,
             f"finish the transfer {' '.join(arguments)}",
         )
     check(
         sorted(path.name for path in issues.glob("[0-9]*"))
         == [
-            "1_Fix_bad_memory", "2.1_Child_one", "2_First_bug",
-            "3_Something", "4_Second", "5_Third",
+            "1_Fix_bad_memory",
+            "2.1_Child_one",
+            "2_First_bug",
+            "3_Something",
+            "4_Second",
+            "5_Third",
         ]
         and not any(tasks.glob("[0-9]*")),
         "finished transfers leave no gaps",
@@ -2313,10 +2335,13 @@ def _test_interrupted_transfer(
         tasks: Items = Items(root / "TASKS")
         issues: Items = Items(root / "ISSUES")
         for collection, number, title in (
-            (tasks, "1", "First bug"), (tasks, "1.1", "Child one"),
-            (tasks, "2", "Second"), (tasks, "3", "Third"),
+            (tasks, "1", "First bug"),
+            (tasks, "1.1", "Child one"),
+            (tasks, "2", "Second"),
+            (tasks, "3", "Third"),
             (tasks, "3.1", "Fourth"),
-            (issues, "1", "Fix bad memory"), (issues, "2", "Something"),
+            (issues, "1", "Fix bad memory"),
+            (issues, "2", "Something"),
         ):
             collection.create_item(number, title)
         os.environ[INTERRUPT_VARIABLE] = str(limit)
@@ -2383,7 +2408,8 @@ def _test_errors(check: Check, directory: Path) -> None:
         "write_startup failure",
     )
     for text, message in (
-        ("{", "Unable to read"), ("[]", "not a JSON object")
+        ("{", "Unable to read"),
+        ("[]", "not a JSON object"),
     ):
         bad: Path = directory / "bad_collection"
         bad.mkdir(exist_ok=True)
