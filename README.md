@@ -41,19 +41,25 @@ a symbolic link to the `ai_contexts.py` program).  For example:
 * `aic ISSUES create` creates the `ISSUES/` directory.
 
 Each one asks before creating the directory, and marks it as a collection
-with a hidden `.ai_contexts.json` file inside it.
+with a hidden `.ai_contexts.json` file inside it.  It also writes
+`AI_Contexts_Rules.md` into the directory, which teaches the AI how to use
+`aic`.
 
 Next, tell the AI about them.  For Claude Code, add these two lines to
 the project's `CLAUDE.md` file:
 
 ```
-@AI_Contexts_Rules.md
+@TASKS/AI_Contexts_Rules.md
 @TASKS/Startup.md
 ```
 
-`AI_Contexts_Rules.md` (see "Installation") teaches the AI how to use
-`aic`, and `TASKS/Startup.md`, which `aic` rewrites every time it runs,
-loads the context of your tasks and issues.
+`aic` rewrites both files every time it runs, so they always exist and
+are always up to date: `AI_Contexts_Rules.md` matches the version of
+`aic` you have, and `TASKS/Startup.md` loads the context of your tasks
+and issues.  (Every collection gets its own copy of
+`AI_Contexts_Rules.md`, so you can import it from whichever collection
+you have; import just one, so that it is not loaded twice.)  `aic` also
+warns you about any `@` import in `CLAUDE.md` whose file does not exist.
 
 To create a task, give it a number and a title:
 
@@ -91,7 +97,7 @@ for `close` or `create`, `aic` lists the choices.)  Tags can not be
 shortened, so `T.wr` must be typed in full (though `t.wr` works too).
 `aic` also works from anywhere inside the project: it looks for the
 collections in the current directory, and then in each parent directory
-in turn.
+in turn, stopping at the top of a git or Mercurial repository.
 
 Numbers are hierarchical, so a task can be broken into smaller ones:
 
@@ -180,8 +186,9 @@ leaves out Closed and Rejected tasks; `aic t ls -a` lists them all.
   `aic t create before 1 Outline the README` creates one in front of
   another; the other tasks are renumbered to make room or close the gap.
 * `aic t rename T.di to Draft the overview` changes a title.  If that
-  changes the tag, `ai_contexts` offers to update every `.md` file in the
-  project that uses the old one.
+  changes the tag, `ai_contexts` offers to update the `.md` files that
+  use the old one, in the collections and directly in the project
+  directory (it suggests a `grep` command for anywhere else).
 * `aic t transfer T.di issues` moves a task that turns out to be an issue
   into `ISSUES/`, where its tag becomes `I.di`.
 * `aic t delete T.di` deletes a task for good.
@@ -234,7 +241,8 @@ runs, it refreshes the copies from their source files and rewrites
 ## Installation
 
 `ai_contexts` is a single Python program, `ai_contexts.py`, that needs
-Python 3.11 or later and nothing beyond the standard library.  To install
+Python 3.11 or later and nothing beyond the standard library.  Nothing
+else needs to be installed: the rules it gives the AI are built in.  To install
 it:
 
 1. Copy `ai_contexts.py` into a directory on your `PATH`, and make a
@@ -245,9 +253,7 @@ it:
    ln -s ai_contexts.py ~/bin/aic
    ```
 
-2. Copy `AI_Contexts_Rules.md` into each project that uses `aic` (or
-   make it a rule; see "Rules Collections").
-3. Create the collections and set up `CLAUDE.md` as described in
+2. Create the collections and set up `CLAUDE.md` as described in
    "Getting Started".
 
 `REFERENCE.md` has the details of how `ai_contexts` works.

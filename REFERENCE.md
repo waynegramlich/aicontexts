@@ -76,8 +76,20 @@ A tag can stand in for its collection: `ai_contexts I.dbzib close` is the same
 as `ai_contexts ISSUES close I.dbzib`.  `ai_contexts t show T.fbm` (or
 `ai_contexts T.fbm show`) shows everything about an Item: its number, tag,
 state, priority, times, state history, directory and `Details.md`.  When a
-rename changes a tag, `ai_contexts` lists the writable `.md` files in the
-project that use the old tag and offers to update them.
+rename changes a tag, `ai_contexts` lists the writable `.md` files that
+use the old tag and offers to update them.  Only the collections (all the
+way down) and the `.md` files directly in the directory that holds them
+are searched, so a big project tree is never walked; a `grep` command is
+suggested for anywhere else.  Hidden directories, the generated
+`AI_Contexts_Rules.md` copies and anything reached through a symbolic
+link are skipped, and the files are always searched in sorted order.
+
+The collections are found in the current directory, or else the nearest
+parent directory that has any.  The search stops at a version control
+root (a directory with `.git` or `.hg`), still checking that directory
+itself, so it never finds the collections of an enclosing project;
+without one, it goes all the way to `/`.  A collection that is a
+symbolic link is skipped.
 
 An Item that belongs in another collection (e.g. a Task that turns out to
 be an Issue) is moved there, with its children, by `ai_contexts t transfer
@@ -109,6 +121,18 @@ how to fix it.
 Run `ai_contexts` with no arguments to list the collections, one line
 each, and `ai_contexts -h` to list the commands.  `ai_contexts t ls -l`
 also lists the created and updated times in the local time zone.
+
+Every run also writes `AI_Contexts_Rules.md`, the rules for using
+`ai_contexts` that the AI loads, into every collection.  Its text is
+built into `ai_contexts.py` (`RULES_TEXT`), so it always matches the
+program and nothing else has to be installed; a copy that differs (such
+as one edited by hand) is replaced, and one that matches is left alone.
+`CLAUDE.md` imports one copy (e.g. `@TASKS/AI_Contexts_Rules.md`).  The
+copies are skipped when a rename or transfer looks for `.md` files that
+use an old tag.  Every run also reports an `@` import in `CLAUDE.md`
+whose file does not exist (only an import that looks like a file, with a
+`/` or a `.` in its path), since `CLAUDE.md` should only import files
+that are known to exist.
 
 ## Rules Collections
 

@@ -23,6 +23,8 @@ from ai_contexts import (
     OLD_COLLECTION_FILE,
     OLD_STATUS_FILE,
     RENUMBER_FILE,
+    RULES_FILE,
+    RULES_TEXT,
     STATES,
     SUMMARIES_VARIABLE,
     Item,
@@ -111,6 +113,10 @@ def test() -> int:
         _test_transfer_recovery(check, Path(temporary))
     with tempfile.TemporaryDirectory() as temporary:
         _test_old_collection_file(check, Path(temporary))
+    with tempfile.TemporaryDirectory() as temporary:
+        _test_rules_files(check, Path(temporary))
+    with tempfile.TemporaryDirectory() as temporary:
+        _test_version_control_root(check, Path(temporary))
     print(f"{len(checks)} checks, {len(failures)} failures")
     return 1 if failures else 0
 
@@ -986,6 +992,8 @@ def _test_references(check: Check, directory: Path) -> None:
     directory.mkdir()
     items: Items = Items(directory / "TASKS")
     items.create_item("1", "Fix Big Mistake")
+    items.create_item("2", "Other Work")
+    other: Path = directory / "TASKS" / "2_Other_Work"
     text: str = "See T.fbm, T.fbm2, XT.fbm and `T.fbm`.\n"
     relative: str
     for relative in (
@@ -993,10 +1001,14 @@ def _test_references(check: Check, directory: Path) -> None:
         "sub/deep.md",
         ".hidden/skipped.md",
         "other.txt",
+        "TASKS/2_Other_Work/Context.md",
+        "TASKS/2_Other_Work/.hidden/skipped.md",
     ):
         (directory / relative).parent.mkdir(exist_ok=True)
         write_file(directory / relative, text)
     (directory / "link.md").symlink_to(directory / "notes.md")
+    (other / "far").symlink_to(directory / "sub")
+    (directory / "LINKED").symlink_to(directory / "TASKS")
     questions: list[str] = []
     answers: list[str] = []
 
@@ -1039,8 +1051,12 @@ def _test_references(check: Check, directory: Path) -> None:
     answers[:] = ["y", "n"]
     output: str = rename("Good", "Fix")
     check(
-        "The following `.md` files have tags that need to be renamed:\n"
-        "  notes.md\n  sub/deep.md\nNot updated; T.fbm is still used"
+        "searched for old tags; to look elsewhere, use e.g. "
+        "`grep -rnwF -e T.fbm .`"
+        in output
+        and "The following `.md` files have tags that need to be renamed:\n"
+        "  TASKS/2_Other_Work/Context.md\n  notes.md\n"
+        "Not updated; T.fbm is still used"
         in output
         and questions[-1] == "OK to update them? (y=Yes, n=No) "
         and read_file(directory / "notes.md") == text,
@@ -1058,7 +1074,9 @@ def _test_references(check: Check, directory: Path) -> None:
     check(
         "Updated T.fbm to T.gf in 2 files" in output
         and read_file(directory / "notes.md") == updated
-        and read_file(directory / "sub" / "deep.md") == updated
+        and read_file(other / "Context.md") == updated
+        and read_file(directory / "sub" / "deep.md") == text
+        and read_file(other / ".hidden" / "skipped.md") == text
         and read_file(directory / ".hidden" / "skipped.md") == text
         and read_file(directory / "other.txt") == text,
         "update the references to a changed tag",
@@ -1066,13 +1084,13 @@ def _test_references(check: Check, directory: Path) -> None:
     if os.geteuid() == 0:
         # Permissions are not enforced for root.
         return  # pragma: no cover
-    (directory / "sub" / "deep.md").chmod(0o444)
+    (other / "Context.md").chmod(0o444)
     rename("Fix", "Big", "Mistake")
     check(
         tag_references(directory, "T.gf") == [directory / "notes.md"],
         "read-only files are not references",
     )
-    (directory / "sub" / "deep.md").chmod(0o644)
+    (other / "Context.md").chmod(0o644)
 
     def refuse_writes(question: str) -> str:
         """Make `notes.md` read-only, then answer yes.
@@ -2947,6 +2965,148 @@ def _test_old_collection_file(check: Check, directory: Path) -> None:
     check(
         found == [locked] and "Can not rename" in errors.getvalue(),
         "report an old .tracker.json that can not be renamed",
+    )
+
+
+# Function `_test_rules_files()`:
+def _test_rules_files(check: Check, directory: Path) -> None:
+    """Test the rules files and the check of the `CLAUDE.md` imports.
+
+    Arguments:
+    * `check` (`Check`):
+      Records a check: a condition that should be true and its
+      description.
+    * `directory` (`Path`):
+      The directory to test in.
+    """
+    answers: list[str] = ["y", "y"]
+    run: Callable[..., tuple[int, str]] = _runner(answers)
+    original: Path = Path.cwd()
+    os.chdir(directory)
+    tasks: Path = directory / "TASKS" / RULES_FILE
+    issues: Path = directory / "ISSUES" / RULES_FILE
+    try:
+        # Creating a collection writes the rules file into it.
+        run("TASKS", "create")
+        check(read_file(tasks) == RULES_TEXT, "a new collection's rules file")
+        run("ISSUES", "create")
+        check(
+            read_file(issues) == RULES_TEXT,
+            "the rules file is in every collection",
+        )
+
+        # A file that matches is left alone; an edited one is replaced.
+        os.utime(tasks, (1_000_000, 1_000_000))
+        write_file(issues, "Edited by hand.\n")
+        code: int
+        text: str
+        code, text = run("t", "create", "1", "Fix Big Mistake")
+        check(
+            code == 0
+            and tasks.stat().st_mtime == 1_000_000
+            and read_file(issues) == RULES_TEXT,
+            "the rules files are rewritten only when they differ",
+        )
+
+        # The rules files are not offered for a tag update.
+        write_file(directory / "Notes.md", "See `T.fbm`.\n")
+        check(
+            "T.fbm" in RULES_TEXT
+            and directory / "Notes.md" in tag_references(directory, "T.fbm")
+            and all(
+                path.name != RULES_FILE
+                for path in tag_references(directory, "T.fbm")
+            ),
+            "the rules files are skipped when looking for a tag",
+        )
+
+        # `CLAUDE.md` imports of missing files are reported.
+        write_file(
+            directory / "CLAUDE.md",
+            f"@TASKS/{RULES_FILE}\n@Missing.md\n@dataclass\n"
+            "`@Code.md`\n@Gone/\n",
+        )
+        code, text = run("t", "ls")
+        check(
+            code == 0
+            and "CLAUDE.md imports @Missing.md (line 2), which does not exist"
+            in text
+            and "CLAUDE.md imports @Gone/ (line 5)" in text
+            and RULES_FILE not in text
+            and "dataclass" not in text
+            and "Code.md" not in text,
+            "report a CLAUDE.md import of a missing file",
+        )
+        code, text = run("t", "bad")
+        check(
+            code == 1 and "@Missing.md" not in text,
+            "CLAUDE.md is not checked when the command is not run",
+        )
+
+        # A rules file that can not be written is an error.
+        issues.unlink()
+        issues.mkdir()
+        code, text = run("t", "ls")
+        check(
+            code == 1 and f"Unable to write '{issues}'" in text,
+            "a rules file that can not be written",
+        )
+        issues.rmdir()
+        answers.append("y")
+        tasks.unlink()
+        tasks.mkdir()
+        code, text = run("NOTES", "create")
+        check(
+            code == 1 and "Unable to write" in text,
+            "a rules file that can not be written by a new collection",
+        )
+    finally:
+        os.chdir(original)
+
+
+# Function `_test_version_control_root()`:
+def _test_version_control_root(check: Check, directory: Path) -> None:
+    """Test that the search for collections stops at a repository root.
+
+    Arguments:
+    * `check` (`Check`):
+      Records a check: a condition that should be true and its
+      description.
+    * `directory` (`Path`):
+      The directory to test in.
+    """
+    relative: str
+    for relative in (
+        "TASKS",
+        "git_repo/.git",
+        "git_repo/sub",
+        "hg_repo/.hg",
+        "hg_repo/ISSUES",
+        "hg_repo/a/b",
+        "plain/sub",
+        "linked/sub",
+    ):
+        (directory / relative).mkdir(parents=True)
+    write_file(directory / "TASKS" / COLLECTION_FILE, "{}\n")
+    write_file(directory / "hg_repo" / "ISSUES" / COLLECTION_FILE, "{}\n")
+    (directory / "linked" / "LINK").symlink_to(directory / "TASKS")
+    check(
+        find_collections(directory / "git_repo" / "sub") == [],
+        "the search for collections stops at a .git root",
+    )
+    check(
+        find_collections(directory / "hg_repo" / "a" / "b")
+        == [directory / "hg_repo" / "ISSUES"],
+        "collections in a version control root are found",
+    )
+    check(
+        find_collections(directory / "plain" / "sub") == [directory / "TASKS"],
+        "without version control, the search goes up",
+    )
+    check(
+        find_collections(directory / "linked" / "sub")
+        == [directory / "TASKS"],
+        "a collection that is a symbolic link is skipped",
     )
 
 

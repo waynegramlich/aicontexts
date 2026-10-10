@@ -4,7 +4,8 @@
 The contexts are items (tasks, issues, rules and so on) kept in
 collection directories.  Each run writes `TASKS/Startup.md` and
 `RULES/Active_Rules.md`, whose `@` imports load the right files at the
-start of each Claude Code session (see `README.md` and `HELP`).
+start of each Claude Code session, and `AI_Contexts_Rules.md` (from
+`RULES_TEXT`) into every collection (see `README.md` and `HELP`).
 """
 
 import contextlib
@@ -33,7 +34,8 @@ HELP: str = """Usage: ai_contexts COLLECTION COMMAND [ARGUMENTS...]
 
 A COLLECTION is a directory containing a `.ai_contexts.json` file.  They
 are found in the current directory, or else the nearest parent directory
-that has any.  COLLECTION and COMMAND may be shortened to any unique
+that has any, stopping at a version control root (a directory with .git
+or .hg).  COLLECTION and COMMAND may be shortened to any unique
 prefix, in any case (e.g. `ai_contexts t cl 2` closes item 2 in TASKS).
 A new collection is created, after asking, next to the existing ones (or
 else in the current directory) and is named exactly as typed.
@@ -129,7 +131,148 @@ must start with different letters.  A tag (with or without its prefix,
 in any case) may be used wherever an item NUMBER is expected.
 
 When priority is enabled for a collection, its items are listed by
-priority first (0 to 3, then none) and the priority is shown."""
+priority first (0 to 3, then none) and the priority is shown.
+
+Every run also writes AI_Contexts_Rules.md, which tells the AI how to use
+ai_contexts, into every collection; add one of them (e.g.
+`@TASKS/AI_Contexts_Rules.md`) to CLAUDE.md.  An `@` import in CLAUDE.md
+whose file does not exist is reported."""
+
+# The file that every run writes into every collection, with the rules
+# for using ai_contexts that the AI loads (from `RULES_TEXT`).
+RULES_FILE: str = "AI_Contexts_Rules.md"
+
+# The contents of `RULES_FILE`.  It is kept here, not in a separate
+# file, so that it always matches the program and needs nothing else
+# installed.
+RULES_TEXT: str = """# AI Contexts Rules
+
+`ai_contexts` writes this file into every collection each time it runs,
+so it always matches the program.  Never edit it; a change to it is
+made in `ai_contexts.py`.
+
+The `ai_contexts` program (often installed as `aic`) creates and manages
+items in collections such as `TASKS/` and `ISSUES/`.  `ai_contexts` with
+no arguments lists the collections, and `ai_contexts -h` lists all of
+the commands.  Every command starts with the collection, which (like the
+command) may be any unique prefix in any case.  The `create` command
+(e.g. `ai_contexts TASKS create 1.2.3 New Task`, or `ai_contexts t cr
+1.2.3 New Task`) creates an item directory (e.g. `TASKS/1.2.3_New_Task/`)
+containing:
+
+* `Details.md`:
+  Edited by the human to describe the item.  Claude only edits it when
+  asked to.
+* `Context.md`:
+  Edited by Claude to retain useful item context across sessions.
+  Claude edits it directly; there is no `ai_contexts` command for it.
+* `Summary.md`:
+  Written by Claude before the item is closed (see below).
+* `.item.json`:
+  Managed by `ai_contexts`.  Claude changes the state with the
+  `pending`, `open`, `reference`, `suspend`, `close` and `reject`
+  commands (e.g. `ai_contexts t close T.fbm`), never by editing this
+  file.
+
+Each item has a tag (e.g. `I.dbzib` for "Division by Zero is Bad" in
+`ISSUES/`), shown by `ai_contexts t ls`; `ai_contexts I.dbzib show`
+shows everything about it.  Use the tag, in back quotes, to refer to an
+item in Markdown text and commit messages; never use item numbers, which
+change when items are deleted or moved.  Commands accept a tag (in any
+case, but never shortened) wherever they take a number, and a tag can
+stand in for its collection (`ai_contexts T.fbm close`).  Renaming an
+item can change its tag; `ai_contexts` then lists the `.md` files that
+use the old tag and offers to update them, and Claude answers yes (after
+checking the list) so that every reference changes in the same pass.
+
+Every `ai_contexts` command checks its collections and prints what it
+fixed and what needs fixing.  When it reports a problem, Claude fixes it
+(usually with the `rename` command it suggests) or tells the user about
+it.
+
+Item numbers never have gaps.  `create` and `move` take a place: the
+next free number of a level (e.g. `1.3`), or `before NUMBER` / `after
+NUMBER` (e.g. `ai_contexts t move T.fbm after 2.1`, or `ai_contexts t
+create before 1.1 Fix Big Mistake`).  `rename NUMBER to TITLE...`
+changes a title.  There is no undo: when `ai_contexts` recommends a
+version control snapshot before a move, rename or transfer and asks
+whether to continue, Claude answers no, takes a snapshot (following the
+project's version control rules), and then runs the command again.
+`delete` is permanent: it refuses an item with children unless given
+`-r` (which asks first), and renumbers the later items.  Never run
+`delete` (or other changing commands) on the real items just to see what
+happens; try it in a scratch directory.
+
+An item that belongs in another collection of the same type (e.g. a
+Task that turns out to be an Issue) is moved there, with its children,
+by `ai_contexts t transfer T.fbm issues [PLACE]`.  Its tag gets the new
+prefix (`T.fbm` becomes `I.fbm`), and `ai_contexts` offers to update the
+`.md` files that use the old tags; as for a rename, Claude answers yes
+after checking the list.  Old tags are not looked up afterwards, so text
+must use the new ones.
+
+When priority is enabled for a collection (e.g. `ai_contexts i enable
+priority`), items may have a priority set with `ai_contexts i priority
+NUMBER LEVEL`, and `ls` lists them by priority first:
+
+* **0**: A catastrophic bug that must be avoided at all costs, such as a
+  security hole or a defect that escapes to where nobody can fix it.
+* **1**: A high priority that needs to be fixed quickly.
+* **2**: A medium priority that needs to be fixed next.
+* **3**: A low priority that gets put near the end of the list.
+
+`-` removes the priority.
+
+New items start out Pending.  The states (of an "items" collection, like
+`TASKS/` and `ISSUES/`) are Pending, Open, Reference, Suspended, Closed
+and Rejected.  A Reference item is not being worked on, but its
+`Context.md` is still loaded, so its context stays available.  A
+Rejected item was decided against (`ai_contexts i reject NUMBER`); it is
+treated like a Closed one, and its `Summary.md` says why.
+
+Before closing an item, Claude writes its `Summary.md` (below the
+heading line that `ai_contexts` maintains): what was decided and done,
+with the tags of related items.  Once the item is closed, only that
+summary is loaded at startup (and after the 50 most recently closed,
+only its tag and title, in the generated `TASKS/Closed.md`), so it
+should be enough to know that the item exists and what it settled.
+`ai_contexts T.fbm show` and the item's files give the rest when needed.
+
+Every time `ai_contexts` is successfully run, it rewrites these files,
+which Claude never edits:
+
+* `TASKS/Startup.md`: `@` imports of the `Details.md` of every item that
+  is not closed, the `Context.md` of every Open or Reference item and
+  the `Summary.md` of the most recently closed items, in every
+  collection.
+* `TASKS/Closed.md`: the tags and titles of the older closed items.
+* `RULES/Active_Rules.md`: `@` imports of the Active rules.
+* `AI_Contexts_Rules.md` (this file), in every collection.
+
+`CLAUDE.md` imports only files that are known to exist, such as these:
+
+```
+@TASKS/AI_Contexts_Rules.md
+@TASKS/Startup.md
+@RULES/Active_Rules.md
+```
+
+Every run reports an `@` import in `CLAUDE.md` whose file does not
+exist; Claude tells the user about it.
+
+`RULES/` is a rules collection (`ai_contexts r type` prints a
+collection's type).  Each rule is a read-only copy of a source file
+elsewhere (e.g. `../claude_code_rules/Version_Control_Rules.md`), made
+and refreshed by `ai_contexts`; its states are Active and InActive
+(`ai_contexts r activate R.vcr`, `ai_contexts r deactivate R.vcr`).
+Claude never edits a rule's copy: a change to a rule is made in its
+source (and only when asked), and the next `ai_contexts` run copies it.
+New rules come from files with `ai_contexts r create PLACE FILE...`,
+and `ai_contexts r source R.vcr FILE` changes a rule's source.  When
+`ai_contexts` reports a copy edited in place, a missing source, an `@`
+import in a rule or a rule that `CLAUDE.md` also imports, Claude tells
+the user rather than fixing it with `refresh`.
+"""
 
 STATES: tuple[str, ...] = (
     "Pending",
@@ -345,6 +488,10 @@ RENAME_KEYS: tuple[str, ...] = (
     "old_number",
     "new_number",
 )
+
+# The entries that mark a version control root, where the search for
+# collections stops.
+VERSION_CONTROL_NAMES: tuple[str, ...] = (".git", ".hg")
 
 # The collection that holds `Startup.md` for all of the collections.
 STARTUP_COLLECTION: str = "TASKS"
@@ -641,10 +788,14 @@ def matches(word: str, names: Iterable[str]) -> list[str]:
 def find_collections(start: Path) -> list[Path]:
     """Return the collection directories nearest to a directory.
 
-    `start` and then each of its parents is searched for sub-directories
-    that contain a `.ai_contexts.json` file.  A collection in the old
-    format, with a `.tracker.json` file instead, is migrated by renaming
-    that file.
+    `start` and then each of its parents is searched for
+    sub-directories that contain a `.ai_contexts.json` file, stopping
+    at the first directory that has any.  The search also stops after a
+    version control root (a directory with `.git` or `.hg`), so that it
+    never finds the collections of an enclosing project; without one,
+    it goes all the way to `/`.  A collection that is a symbolic link
+    is skipped.  A collection in the old format, with a `.tracker.json`
+    file instead, is migrated by renaming that file.
 
     Arguments:
     * `start` (`Path`):
@@ -652,20 +803,19 @@ def find_collections(start: Path) -> list[Path]:
 
     Returns:
     * (`list[Path]`): The collections in the first directory that has
-      any, or an empty list if none are found.
+      any, sorted, or an empty list if none are found.
     """
     # Search `start` and then each of its parents for collections.
     directory: Path
     for directory in (start, *start.parents):
-        try:
-            found: list[Path] = sorted(
-                path
-                for path in directory.iterdir()
-                if (path / COLLECTION_FILE).is_file()
-                or (path / OLD_COLLECTION_FILE).is_file()
-            )
-        except OSError:
-            continue
+        found: list[Path] = sorted(
+            {
+                marker.parent
+                for file_name in (COLLECTION_FILE, OLD_COLLECTION_FILE)
+                for marker in directory.glob(f"*/{file_name}")
+                if marker.is_file() and not marker.parent.is_symlink()
+            }
+        )
 
         # Migrate any old `.tracker.json` files.
         path: Path
@@ -681,9 +831,12 @@ def find_collections(start: Path) -> list[Path]:
                         file=sys.stderr,
                     )
 
-        # Stop at the first directory that has collections.
+        # Stop at the first directory that has collections, or after a
+        # version control root.
         if found:
             return found
+        if any((directory / name).exists() for name in VERSION_CONTROL_NAMES):
+            break
 
     # No collections were found.
     return []
@@ -1035,42 +1188,56 @@ def has_summary(item_directory: Path) -> bool:
 def tag_references(root: Path, tag: str) -> list[Path]:
     """Return the writable `.md` files that mention a tag.
 
-    Hidden directories (like `.git`) and symbolic links are skipped.  A
-    mention is the whole tag, so "T.fbm" is not found in "T.fbm2" or
-    "XT.fbm".
+    Only two places are searched, so that a big project tree is never
+    walked: the `.md` files directly in `root`, and every `.md` file in
+    each collection in `root`.  A file in a hidden directory, a file
+    reached through a symbolic link (the file itself or any directory
+    on the way), and the generated `RULES_FILE` in each collection are
+    skipped.  A mention is the whole tag, so "T.fbm" is not found in
+    "T.fbm2" or "XT.fbm".
 
     Arguments:
     * `root` (`Path`):
-      The directory to search.
+      The directory that holds the collections.
     * `tag` (`str`):
       The tag, with its collection prefix.
 
     Returns:
-    * (`list[Path]`): The files that mention `tag`.
+    * (`list[Path]`): The files that mention `tag`, sorted.
     """
-    # Walk the tree, skipping hidden directories.
+    # Gather the `.md` files directly in `root` and in each collection.
+    paths: set[Path] = set(root.glob("*.md"))
+    collection: Path
+    for collection in sorted(
+        marker.parent for marker in root.glob(f"*/{COLLECTION_FILE}")
+    ):
+        if collection.is_symlink():
+            continue
+        path: Path
+        for path in collection.rglob("*.md"):
+            relative: tuple[str, ...] = path.relative_to(collection).parts
+            if (
+                not any(part.startswith(".") for part in relative)
+                and relative != (RULES_FILE,)
+                and not any(
+                    (collection / Path(*relative[:end])).is_symlink()
+                    for end in range(1, len(relative))
+                )
+            ):
+                paths.add(path)
+
+    # Search each writable Markdown file that is not a link.
     pattern: re.Pattern[str] = tag_pattern(tag)
     found: list[Path] = []
-    directory: str
-    subdirectories: list[str]
-    file_names: list[str]
-    for directory, subdirectories, file_names in os.walk(root):
-        subdirectories[:] = sorted(
-            name for name in subdirectories if not name.startswith(".")
-        )
-
-        # Search each writable Markdown file that is not a link.
-        file_name: str
-        for file_name in sorted(file_names):
-            path: Path = Path(directory) / file_name
-            if (
-                file_name.endswith(".md")
-                and not path.is_symlink()
-                and os.access(path, os.W_OK)
-            ):
-                with contextlib.suppress(OSError, UnicodeDecodeError):
-                    if pattern.search(read_file(path)):
-                        found.append(path)
+    for path in sorted(paths):
+        if (
+            path.is_file()
+            and not path.is_symlink()
+            and os.access(path, os.W_OK)
+        ):
+            with contextlib.suppress(OSError, UnicodeDecodeError):
+                if pattern.search(read_file(path)):
+                    found.append(path)
 
     # Return the files that mention the tag.
     return found
@@ -3910,9 +4077,10 @@ class Items:
     ) -> str:
         """Offer to change old tags to new ones in the `.md` files.
 
-        The files are found by `tag_references()` in the directory that
-        holds the collections, and every old tag is changed in one pass
-        if the user answers yes.
+        The files are found by `tag_references()` in the collections and
+        directly in the directory that holds them, and every old tag is
+        changed in one pass if the user answers yes.  Since nothing else
+        is searched, a hint says how to look for the old tags elsewhere.
 
         Arguments:
         * `tags` (`dict[str, str]`):
@@ -3932,6 +4100,11 @@ class Items:
                 for old_tag in tags
                 for path in tag_references(root, old_tag)
             }
+        )
+        print(
+            "Only the collections and the `.md` files directly in "
+            f"'{root}' are searched for old tags; to look elsewhere, use "
+            "e.g. `grep -rnwF -e " + " -e ".join(tags) + " .`"
         )
         if not paths:
             return ""
@@ -4090,17 +4263,16 @@ class Items:
             return 1
         print(f"Created '{path}'")
 
-        # Rewrite `Startup.md` to include it.
+        # Rewrite `Startup.md` to include it, and write the rules files.
         collections: list[Items] = [
             Items(directory) for directory in directories
         ]
-        error: str = write_startup(
-            [
-                collection
-                for collection in [created, *collections]
-                if not collection.error
-            ]
-        )
+        loaded: list[Items] = [
+            collection
+            for collection in [created, *collections]
+            if not collection.error
+        ]
+        error: str = write_startup(loaded) or write_rules_files(loaded)
         if error:
             print(error, file=sys.stderr)
             return 1
@@ -4290,16 +4462,23 @@ class Items:
             case state_command:
                 error = items.state_command(state_command, rest)
 
-        # After a success, rewrite `Startup.md` and `Active_Rules.md`.
+        # After a success, rewrite `Startup.md`, `Active_Rules.md` and
+        # the rules files.
         if not error:
             loaded: list[Items] = [
                 collection
                 for collection in collections
                 if not collection.error
             ]
-            error = write_startup(loaded) or write_active_rules(loaded)
+            error = (
+                write_startup(loaded)
+                or write_active_rules(loaded)
+                or write_rules_files(loaded)
+            )
 
-        # Report any error.
+        # Report any `CLAUDE.md` import of a missing file, then any
+        # error.
+        check_claude_imports(directories[0].parent)
         if error:
             print(error, file=sys.stderr)
             return 1
@@ -4788,6 +4967,73 @@ def write_active_rules(collections: list["Items"]) -> str:
 
     # Report success.
     return ""
+
+
+# Function `write_rules_files()`:
+def write_rules_files(collections: list["Items"]) -> str:
+    """Write `RULES_FILE` into every collection.
+
+    A file that already holds `RULES_TEXT` is left alone, so that its
+    time does not change; any other contents (such as an edit by hand)
+    are replaced.
+
+    Arguments:
+    * `collections` (`list[Items]`):
+      Every collection.
+
+    Returns:
+    * (`str`): An empty string on success, or an error string on
+      failure.
+    """
+    # Write the file in each collection that does not have it yet.
+    collection: Items
+    for collection in collections:
+        path: Path = collection.items_directory / RULES_FILE
+        with contextlib.suppress(OSError, ValueError):
+            if read_file(path) == RULES_TEXT:
+                continue
+        try:
+            write_file(path, RULES_TEXT)
+        except OSError as error:
+            return f"Unable to write '{path}': {error}"
+
+    # Report success.
+    return ""
+
+
+# Function `check_claude_imports()`:
+def check_claude_imports(root: Path) -> None:
+    """Report each `@` import in `CLAUDE.md` whose file does not exist.
+
+    `CLAUDE.md` should only import files that are known to exist, so
+    that loading it never quietly leaves something out.  Only an import
+    that looks like a file (its path has a `/` or a `.`) is checked, so
+    that a word like `@dataclass` is not reported.  The messages go to
+    stderr.
+
+    Arguments:
+    * `root` (`Path`):
+      The directory that holds the collections and `CLAUDE.md`.
+    """
+    # Read `CLAUDE.md`, if there is one.
+    claude: Path = root / "CLAUDE.md"
+    try:
+        text: str = read_file(claude)
+    except (OSError, ValueError):
+        return
+
+    # Report each import of a file that does not exist.
+    number: int
+    path: str
+    for number, path in markdown_imports(text):
+        if ("/" in path or "." in path) and not (
+            root / Path(path).expanduser()
+        ).exists():
+            print(
+                f"CLAUDE.md imports @{path} (line {number}), which does "
+                "not exist",
+                file=sys.stderr,
+            )
 
 
 # Function `closed_time()`:

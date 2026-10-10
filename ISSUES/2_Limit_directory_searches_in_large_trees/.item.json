@@ -1,11 +1,19 @@
 {
-  "state": "Pending",
+  "state": "Closed",
   "created": "2026-10-09T23:01:51Z",
-  "updated": "2026-10-09T23:01:51Z",
+  "updated": "2026-10-10T01:21:18Z",
   "history": [
     {
       "state": "Pending",
       "time": "2026-10-09T23:01:51Z"
+    },
+    {
+      "state": "Open",
+      "time": "2026-10-10T00:22:13Z"
+    },
+    {
+      "state": "Closed",
+      "time": "2026-10-10T01:21:18Z"
     }
   ],
   "tag": "ldsilt"
