@@ -14,3 +14,6 @@ Parentheses are always empty.  Use the defining class's name for
 overridden methods.  Keep markers in sync when renaming.  Nested
 functions and classes (and their methods) get no marker.  A marker may
 exceed 72 characters if the name requires it.
+
+Test suite files (as defined in the Python Coding Rules) are exempt
+from these rules.

@@ -7,4 +7,5 @@ format` (`.flake8` ignores E203), slotted dataclasses with explicit
 docstrings within 72 columns, and a type hint for every variable that can
 take one (from `dmypy inspect`).  Block comments (295) were added to
 `ai_contexts.py` only, since the user is excluding test suites from that
-part of the rule.  Each step was a separate commit.
+part of the rule; that exemption was later dropped, and `T.bcts`
+added them to `ai_contexts_test.py`.  Each step was a separate commit.

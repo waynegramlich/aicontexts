@@ -67,6 +67,7 @@ def test() -> int:
     Returns:
     * (`int`): 0 if every check passes and 1 otherwise.
     """
+    # Record every check, and the failed ones.
     failures: list[str] = []
     checks: list[str] = []
 
@@ -84,6 +85,7 @@ def test() -> int:
             failures.append(description)
             print(f"FAIL: {description}", file=sys.stderr)
 
+    # Run most of the tests in one temporary directory.
     temporary: str
     with tempfile.TemporaryDirectory() as temporary:
         root: Path = Path(temporary)
@@ -99,6 +101,7 @@ def test() -> int:
         _test_checks(check, root / "checks")
         _test_write_failures(check, root / "failures")
         _test_errors(check, root / "errors")
+
     # The commands search upward for collections, so they are tested
     # away from the collections made by the other tests.
     with tempfile.TemporaryDirectory() as temporary:
@@ -117,6 +120,8 @@ def test() -> int:
         _test_rules_files(check, Path(temporary))
     with tempfile.TemporaryDirectory() as temporary:
         _test_version_control_root(check, Path(temporary))
+
+    # Report the results.
     print(f"{len(checks)} checks, {len(failures)} failures")
     return 1 if failures else 0
 
@@ -130,6 +135,7 @@ def _test_parsing(check: Check) -> None:
       Records a check: a condition that should be true and its
       description.
     """
+    # Check parsing item numbers.
     check(parse_number("1.2.3") == (1, 2, 3), "parse 1.2.3")
     check(parse_number("01.2") == (1, 2), "parse 01.2")
     number: str
@@ -138,6 +144,8 @@ def _test_parsing(check: Check) -> None:
             isinstance(parse_number(number), str),
             f"reject number {number!r}",
         )
+
+    # Check cleaning up titles.
     title: str
     cleaned: str
     for title, cleaned in (
@@ -152,6 +160,8 @@ def _test_parsing(check: Check) -> None:
             clean_title(title) == cleaned,
             f"clean_title({title!r})",
         )
+
+    # Check matching names by prefix.
     names: list[str] = ["TASKS", "Tools", "ISSUES"]
     word: str
     matched: object
@@ -168,6 +178,8 @@ def _test_parsing(check: Check) -> None:
         matches("task", ["TASK", "TASKS"]) == ["TASK"],
         "an exact match wins",
     )
+
+    # Check making tags from titles.
     tag: str
     for title, tag in (
         ("Division by Zero is Bad", "dbzib"),
@@ -180,6 +192,8 @@ def _test_parsing(check: Check) -> None:
         ("!!", ""),
     ):
         check(base_tag(title) == tag, f"base_tag({title!r})")
+
+    # Check making a tag unique.
     unique_cases: list[tuple[str, list[str], str]] = [
         ("cde", [], "cde"),
         ("cde", ["cde"], "cde2"),
@@ -189,6 +203,8 @@ def _test_parsing(check: Check) -> None:
     used: list[str]
     for base, used, tag in unique_cases:
         check(unique_tag(base, used) == tag, f"unique_tag {used}")
+
+    # Check parsing priorities.
     level: str
     priority: int | None
     for level, priority in (("0", 0), ("3", 3), ("-", None)):
@@ -198,6 +214,8 @@ def _test_parsing(check: Check) -> None:
             isinstance(parse_priority(level), str),
             f"reject priority {level!r}",
         )
+
+    # Check printing items.
     printed: list[Item] = [
         Item((1,), "Can Dogs Eat", tag="cde", priority=0),
         Item((1, 2), "X", "Reference", tag="x"),
@@ -213,6 +231,8 @@ def _test_parsing(check: Check) -> None:
         "1.2  Reference  -  I.x    X\n",
         "print_items shows the tag, and the priority if asked",
     )
+
+    # Check making tag prefixes from collection names.
     collection_name: str
     prefix: str
     for collection_name, prefix in (
@@ -224,6 +244,8 @@ def _test_parsing(check: Check) -> None:
             tag_prefix(collection_name) == prefix,
             f"tag_prefix({collection_name!r})",
         )
+
+    # Check formatting timestamps.
     check(utc_stamp(0) == "1970-01-01T00:00:00Z", "utc_stamp")
     epoch: datetime = datetime.fromtimestamp(0, UTC).astimezone()
     check(
@@ -234,11 +256,15 @@ def _test_parsing(check: Check) -> None:
     shown: str
     for stamp, shown in (("", "-"), ("junk", "?"), ("2026-01-01", "?")):
         check(local_time(stamp) == shown, f"local_time({stamp!r})")
+
+    # Check the `Item` defaults and states.
     check(Item((1, 2), "p").number == "1.2", "Item.number")
     check(Item((1,), "p").state == "Pending", "default is Pending")
     state: str
     for state in STATES:
         check(Item((1,), "p", state).state == state, f"{state} ok")
+
+    # Check that `Item` rejects bad numbers and states.
     bad_items: list[tuple[object, str]] = [
         ((), "Open"),
         ((0,), "Open"),
@@ -268,6 +294,7 @@ def _test_items(check: Check, directory: Path) -> None:
     * `directory` (`Path`):
       The directory to test in.
     """
+    # Create a collection, which records its format version.
     items: Items = Items(directory)
     check(
         not items.error
@@ -275,6 +302,8 @@ def _test_items(check: Check, directory: Path) -> None:
         == f'{{\n  "version": "{FORMAT_VERSION}"\n}}\n',
         "create TASKS with a format version",
     )
+
+    # Add the format version to an older collection.
     write_file(directory / COLLECTION_FILE, '{"priority": false}\n')
     check(
         Items(directory).settings
@@ -283,6 +312,8 @@ def _test_items(check: Check, directory: Path) -> None:
         == FORMAT_VERSION,
         "add the format version to an older collection",
     )
+
+    # Report a collection with another format version.
     write_file(directory / COLLECTION_FILE, '{"version": "9.9"}\n')
     errors: io.StringIO = io.StringIO()
     with contextlib.redirect_stderr(errors):
@@ -292,6 +323,8 @@ def _test_items(check: Check, directory: Path) -> None:
         in errors.getvalue(),
         "report another format version",
     )
+
+    # Create item 1 and check its files.
     write_file(directory / COLLECTION_FILE, '{"version": "0.1"}\n')
     item: Item | str = items.create_item("1", "  top item  ")
     check(
@@ -315,6 +348,8 @@ def _test_items(check: Check, directory: Path) -> None:
         read_file(top / "Details.md") == "# 1 top item\n",
         "Details.md file",
     )
+
+    # Create more items, cleaning up a directory name.
     items.create_item("1.1", "fix the-bug, (now)!")
     check(
         (directory / "1.1_Fix_the_bug_now").is_dir(),
@@ -323,6 +358,8 @@ def _test_items(check: Check, directory: Path) -> None:
     number: str
     for number in ("2", "1.2", "1.1.1", "1.1.2"):
         items.create_item(number, f"item {number}")
+
+    # Reject bad numbers, bad titles and gaps.
     title: str
     for number, title in (
         ("1.1", "duplicate"),
@@ -348,6 +385,8 @@ def _test_items(check: Check, directory: Path) -> None:
         and "3 does not exist" in str(items.create_item("3.1", "x")),
         "create explains a gap",
     )
+
+    # Open two items, then test listing and changing states.
     items.set_state((1,), "Open", True)
     items.set_state((2,), "Open")
     _test_list_and_state(check, items, directory)
@@ -381,6 +420,7 @@ def _test_list_and_state(check: Check, items: Items, directory: Path) -> None:
             return [listed]
         return [item.number for item in listed]
 
+    # Check listing items.
     check(
         numbers(items.list_items())
         == ["1", "1.1", "1.1.1", "1.1.2", "1.2", "2"],
@@ -391,6 +431,8 @@ def _test_list_and_state(check: Check, items: Items, directory: Path) -> None:
         "list 1.1 and its children",
     )
     check(items.list_items((9,)) == [], "list with no matches")
+
+    # Check closing an item, which records its history.
     check(
         numbers(items.set_state((1, 1), "Closed")) == ["1.1"],
         "close 1.1",
@@ -406,6 +448,8 @@ def _test_list_and_state(check: Check, items: Items, directory: Path) -> None:
         == ["Pending", "Open", "Closed"],
         "history of 1.1",
     )
+
+    # Check suspending an item and its children.
     check(items.items[(1, 1, 1)].state == "Open", "1.1.1 still Open")
     check(
         numbers(items.set_state((1, 1), "Suspended", True))
@@ -413,6 +457,8 @@ def _test_list_and_state(check: Check, items: Items, directory: Path) -> None:
         "suspend -r 1.1",
     )
     check(items.items[(1, 2)].state == "Open", "1.2 still Open")
+
+    # Reject bad state changes.
     name: tuple[int]
     state: str
     recursive: bool
@@ -425,6 +471,8 @@ def _test_list_and_state(check: Check, items: Items, directory: Path) -> None:
             isinstance(items.set_state(name, state, recursive), str),
             f"reject set_state {name} {state} {recursive}",
         )
+
+    # Check writing `Startup.md` for TASKS and ISSUES.
     items.set_state((2,), "Reference")
     items.create_item("3", "Later")
     issues: Items = Items(directory.parent / "ISSUES")
@@ -462,6 +510,7 @@ def _test_reload(check: Check, directory: Path) -> None:
     * `directory` (`Path`):
       The directory to test in.
     """
+    # Make some bad item directories.
     (directory / "junk").mkdir()
     bad_state: Path = directory / "5_Bad_state"
     bad_state.mkdir()
@@ -473,11 +522,15 @@ def _test_reload(check: Check, directory: Path) -> None:
         (directory / directory_name).mkdir()
         write_file(directory / directory_name / ITEM_FILE, text)
         write_file(directory / directory_name / "Details.md", "# x\n")
+
+    # Make an item in the old `.status` format.
     old_format: Path = directory / "4_Old_format"
     old_format.mkdir()
     write_file(old_format / OLD_STATUS_FILE, "Suspended\n")
     os.utime(old_format / OLD_STATUS_FILE, (0, 0))
     write_file(old_format / "Details.md", "# 4 Old format\n")
+
+    # Reload the items, skipping the bad ones and migrating the old one.
     errors: io.StringIO = io.StringIO()
     with contextlib.redirect_stderr(errors):
         items: Items = Items(directory)
@@ -494,6 +547,8 @@ def _test_reload(check: Check, directory: Path) -> None:
         },
         "migrate a .status file to .item.json",
     )
+
+    # Check that `set_state()` keeps other metadata and sets the time.
     write_item(
         old_format, {"state": "Suspended", "tags": ["x"], "updated": "x"}
     )
@@ -512,11 +567,15 @@ def _test_reload(check: Check, directory: Path) -> None:
         read_item(old_format) == metadata,
         "set_state to the same state changes nothing",
     )
+
+    # Check `set_state()` with a bad item file.
     write_file(old_format / ITEM_FILE, "[]")
     check(
         "Unable to write" in str(items.set_state((4,), "Open")),
         "set_state with a bad item file",
     )
+
+    # Check the reloaded titles and states.
     check(
         items.items[(1, 1)].title == "fix the-bug, (now)!",
         "reload title from Details.md",
@@ -526,6 +585,8 @@ def _test_reload(check: Check, directory: Path) -> None:
         == ["Open", "Suspended", "Suspended", "Suspended", "Open"],
         "reload states",
     )
+
+    # Check a collection that is a file.
     not_a_directory: Path = directory.parent / "not_a_directory"
     write_file(not_a_directory, "")
     with contextlib.redirect_stderr(io.StringIO()):
@@ -543,6 +604,7 @@ def _test_rename_delete(check: Check, directory: Path) -> None:
     * `directory` (`Path`):
       The directory to test in.
     """
+    # Create some items and rename one.
     items: Items = Items(directory)
     number: str
     title: str
@@ -571,6 +633,8 @@ def _test_rename_delete(check: Check, directory: Path) -> None:
         != "x",
         "rename sets the updated time",
     )
+
+    # Check the tags of new and renamed items.
     for number, title in (
         ("3", "Can Dogs Eat"),
         ("4", "Caffeine Drink Elixir"),
@@ -594,6 +658,8 @@ def _test_rename_delete(check: Check, directory: Path) -> None:
         [item.tag for item in Items(directory).list_items((3,))] == ["ht2"],
         "reload a tag",
     )
+
+    # Rename an item whose `Details.md` has no heading.
     items.delete_items([(3,), (4,), (5,)])
     write_file(directory / "2_Two" / "Details.md", "Notes\n")
     items.rename_item((2,), "Two")
@@ -601,6 +667,8 @@ def _test_rename_delete(check: Check, directory: Path) -> None:
         read_file(directory / "2_Two" / "Details.md") == "# 2 Two\nNotes\n",
         "rename adds a missing Details.md heading",
     )
+
+    # Reject bad renames.
     (directory / "2_Taken").mkdir()
     name: tuple[int]
     for name, title in (((9,), "Nine"), ((1,), " !! "), ((2,), "taken")):
@@ -609,10 +677,15 @@ def _test_rename_delete(check: Check, directory: Path) -> None:
             f"reject rename {name} {title!r}",
         )
     (directory / "2_Taken").rmdir()
+
+    # Check reloading a renamed item.
     check(
         Items(directory).items[(1,)].title == "Uno, again",
         "reload a renamed item",
     )
+
+    # Check that delete refuses an item with children, and that `-r`
+    # asks first.
     check(
         "has children" in str(items.delete_items([(1,)])),
         "delete refuses an item with children",
@@ -623,6 +696,8 @@ def _test_rename_delete(check: Check, directory: Path) -> None:
         and (directory / "1_Uno_again").is_dir(),
         "delete -r asks first",
     )
+
+    # Answer yes to deleting with `-r`, recording the question.
     questions: list[str] = []
 
     def yes(question: str) -> str:
@@ -638,6 +713,7 @@ def _test_rename_delete(check: Check, directory: Path) -> None:
         questions.append(question)
         return "y"
 
+    # Delete item 1 and its child, which renumbers item 2.
     result: tuple[list[Item], dict[str, Item]] | str = items.delete_items(
         [(1,)], True, yes
     )
@@ -654,12 +730,16 @@ def _test_rename_delete(check: Check, directory: Path) -> None:
         == "# 1 Two\nNotes\n",
         "delete -r 1 renumbers 2 to 1",
     )
+
+    # Reject deleting an item that does not exist.
     recursive: bool
     for recursive in (False, True):
         check(
             isinstance(items.delete_items([(9,)], recursive), str),
             f"reject delete 9 recursive={recursive}",
         )
+
+    # Check failing to rename.
     details_path: Path = directory / "1_Two" / "Details.md"
     details_path.unlink()
     details_path.mkdir()
@@ -667,6 +747,8 @@ def _test_rename_delete(check: Check, directory: Path) -> None:
         "Unable to rename" in str(items.rename_item((1,), "Deux")),
         "rename failure",
     )
+
+    # Check failing to renumber.
     items.create_item("2", "Three")
     (directory / "2_Three" / "Details.md").unlink()
     (directory / "2_Three" / "Details.md").mkdir()
@@ -675,9 +757,13 @@ def _test_rename_delete(check: Check, directory: Path) -> None:
         and items.directories[(1,)] == directory / "1_Three",
         "renumber failure",
     )
+
+    # The remaining checks need permissions.
     if os.geteuid() == 0:
         # Permissions are not enforced for root.
         return  # pragma: no cover
+
+    # Check failing to delete.
     directory.chmod(0o500)
     try:
         check(
@@ -699,6 +785,7 @@ def _test_numbering(check: Check, directory: Path) -> None:
     * `directory` (`Path`):
       The directory to test in.
     """
+    # Check listing in numeric order.
     items: Items = Items(directory)
     part: int
     for part in range(1, 12):
@@ -707,6 +794,8 @@ def _test_numbering(check: Check, directory: Path) -> None:
         [item.number for item in items.list_items()][8:] == ["9", "10", "11"],
         "list in numeric order",
     )
+
+    # Make item 1 and its children.
     items.delete_items([(part,) for part in range(4, 12)])
     number: str
     title: str
@@ -732,6 +821,7 @@ def _test_numbering(check: Check, directory: Path) -> None:
             for item in Items(directory).list_items((1,))
         ]
 
+    # Delete 1.1, which renumbers the later items and their children.
     result: tuple[list[Item], dict[str, Item]] | str = items.delete_items(
         [(1, 1)]
     )
@@ -760,6 +850,8 @@ def _test_numbering(check: Check, directory: Path) -> None:
         and read_file(directory / "1.2.1_F" / "Details.md") == "# 1.2.1 F\n",
         "delete 1.1 renumbers the later items and their children",
     )
+
+    # Reject bad ranges.
     word: str
     message: str
     for word, message in (
@@ -772,16 +864,22 @@ def _test_numbering(check: Check, directory: Path) -> None:
             message in str(items.resolve_range(word)),
             f"reject range {word!r}",
         )
+
+    # Check resolving a tag and a range.
     check(
         items.resolve_range("N.e") == [(1, 2)]
         and items.resolve_range("1.3-4") == [(1, 3), (1, 4)],
         "resolve a tag and a range",
     )
+
+    # Delete a range.
     items.delete_items([(1, 3), (1, 4)])
     check(
         tree() == ["1 Top 1", "1.1 C", "1.1.1 D", "1.2 E", "1.2.1 F"],
         "delete a range",
     )
+
+    # Fix and report a gap made by hand.
     items.create_item("1.3", "G")
     shutil.rmtree(directory / "1.1_C")
     errors: io.StringIO = io.StringIO()
@@ -794,9 +892,13 @@ def _test_numbering(check: Check, directory: Path) -> None:
         "(1.1 missing); renumbered 1.1.1 -> 1.1" in errors.getvalue(),
         "report a gap made by hand",
     )
+
+    # The remaining checks need permissions.
     if os.geteuid() == 0:
         # Permissions are not enforced for root.
         return  # pragma: no cover
+
+    # Report a failure to fix a gap.
     shutil.rmtree(directory / "2_Top_2")
     (directory / "3_Top_3" / "Details.md").chmod(0o400)
     errors = io.StringIO()
@@ -819,6 +921,7 @@ def _test_moving(check: Check, directory: Path) -> None:
     * `directory` (`Path`):
       The directory to test in.
     """
+    # Create some items.
     items: Items = Items(directory)
     number: str
     title: str
@@ -842,12 +945,15 @@ def _test_moving(check: Check, directory: Path) -> None:
             for item in Items(directory).list_items()
         )
 
+    # Check creating at a free number.
     check(
         "already exists" in str(items.create_item("1.2", "X"))
         and isinstance(items.create_item("1.3", "X"), Item)
         and isinstance(items.create_item("3", "Y"), Item),
         "create at a free number",
     )
+
+    # Check creating before and after an item.
     items.delete_items([(1, 3)])
     items.delete_items([(3,)])
     items.create_item("1.1", "N", "before")
@@ -858,12 +964,16 @@ def _test_moving(check: Check, directory: Path) -> None:
     )
     items.create_item("M.n", "F", "after")
     check(tree() == "1A 1.1N 1.2F 1.3B 1.4C 2D 2.1E", "create after 1.1")
+
+    # Reject creating at a bad place.
     check(
         "does not exist" in str(items.create_item("9", "X", "before"))
         and "empty title" in str(items.create_item("1", "!!", "after"))
         and tree() == "1A 1.1N 1.2F 1.3B 1.4C 2D 2.1E",
         "reject create at a bad place",
     )
+
+    # Move a range before an item.
     moved: dict[str, Item] | str = items.move_items(
         [(1, 3), (1, 4)], "before", (1, 1)
     )
@@ -874,6 +984,8 @@ def _test_moving(check: Check, directory: Path) -> None:
         == {"1.1": "1.3", "1.2": "1.4", "1.3": "1.1", "1.4": "1.2"},
         "move a range before 1.1",
     )
+
+    # Move after an item, and to a free number.
     items.move_items([(1, 1)], "after", (2, 1))
     check(tree() == "1A 1.1C 1.2N 1.3F 2D 2.1E 2.2B", "move after 2.1")
     items.move_items([(2,)], "", (1, 4))
@@ -881,6 +993,8 @@ def _test_moving(check: Check, directory: Path) -> None:
         tree() == "1A 1.1C 1.2N 1.3F 1.4D 1.4.1E 1.4.2B",
         "move to a free number with children",
     )
+
+    # Reject bad moves.
     bad_moves: list[
         tuple[list[tuple[int, ...]], str, tuple[int, ...], str]
     ] = [
@@ -901,6 +1015,8 @@ def _test_moving(check: Check, directory: Path) -> None:
             message in str(items.move_items(names, place, target)),
             f"reject move {names} {place} {target}",
         )
+
+    # Check a move to the same place.
     check(
         items.move_items([(1, 1)], "before", (1, 2)) == {},
         "a move to the same place changes nothing",
@@ -918,12 +1034,16 @@ def _test_recovery(check: Check, directory: Path) -> None:
     * `directory` (`Path`):
       The directory to test in.
     """
+    # Interrupt a renumbering after each step, and check that loading
+    # finishes it.
     directory.mkdir()
     interruptions: int = 0
     limit: int
     for limit in range(12):
+        # Make a collection with three items.
         collection: Path = directory / f"after_{limit}"
         items: Items = Items(collection)
+
         # Same titles, so new directory names are old ones.
         number: str
         title: str
@@ -933,6 +1053,8 @@ def _test_recovery(check: Check, directory: Path) -> None:
             ("2", "Notes"),
         ):
             items.create_item(number, title)
+
+        # Interrupt a move after `limit` steps.
         os.environ[INTERRUPT_VARIABLE] = str(limit)
         interrupted: bool = False
         try:
@@ -942,6 +1064,8 @@ def _test_recovery(check: Check, directory: Path) -> None:
         finally:
             del os.environ[INTERRUPT_VARIABLE]
         interruptions += interrupted
+
+        # Reload, which finishes any interrupted renumbering.
         errors: io.StringIO = io.StringIO()
         with contextlib.redirect_stderr(errors):
             reloaded: Items = Items(collection)
@@ -959,7 +1083,11 @@ def _test_recovery(check: Check, directory: Path) -> None:
             == interrupted,
             f"finish a renumbering interrupted after {limit} steps",
         )
+
+    # Check the number of steps.
     check(interruptions == 9, "a renumbering has nine steps")
+
+    # Report a damaged renumber file.
     text: str
     message: str
     for text, message in (
@@ -989,6 +1117,7 @@ def _test_references(check: Check, directory: Path) -> None:
     * `directory` (`Path`):
       The directory to test in.
     """
+    # Make two items and some files that refer to `T.fbm`.
     directory.mkdir()
     items: Items = Items(directory / "TASKS")
     items.create_item("1", "Fix Big Mistake")
@@ -1009,6 +1138,8 @@ def _test_references(check: Check, directory: Path) -> None:
     (directory / "link.md").symlink_to(directory / "notes.md")
     (other / "far").symlink_to(directory / "sub")
     (directory / "LINKED").symlink_to(directory / "TASKS")
+
+    # Answer questions with the given answers, recording them.
     questions: list[str] = []
     answers: list[str] = []
 
@@ -1048,6 +1179,7 @@ def _test_references(check: Check, directory: Path) -> None:
             error: str = items.rename_command(["1", "to", *words], ask)
         return error + output.getvalue()
 
+    # List the references to a changed tag and leave them.
     answers[:] = ["y", "n"]
     output: str = rename("Good", "Fix")
     check(
@@ -1062,12 +1194,16 @@ def _test_references(check: Check, directory: Path) -> None:
         and read_file(directory / "notes.md") == text,
         "list the references to a changed tag and leave them",
     )
+
+    # Ask nothing without references or without a new tag.
     answers[:] = []
     check(
         "following" not in rename("Fix", "Big", "Mistake")
         and "following" not in rename("Fix", "Big", "Mistakes"),
         "no question without references or without a new tag",
     )
+
+    # Update the references to a changed tag.
     answers[:] = ["yes"]
     output = rename("Good", "Fix")
     updated: str = "See T.gf, T.fbm2, XT.fbm and `T.gf`.\n"
@@ -1081,9 +1217,13 @@ def _test_references(check: Check, directory: Path) -> None:
         and read_file(directory / "other.txt") == text,
         "update the references to a changed tag",
     )
+
+    # The remaining checks need permissions.
     if os.geteuid() == 0:
         # Permissions are not enforced for root.
         return  # pragma: no cover
+
+    # Check that read-only files are not references.
     (other / "Context.md").chmod(0o444)
     rename("Fix", "Big", "Mistake")
     check(
@@ -1105,6 +1245,7 @@ def _test_references(check: Check, directory: Path) -> None:
         (directory / "notes.md").chmod(0o444)
         return "y"
 
+    # Report a reference that can not be updated.
     write_file(directory / "notes.md", "T.fbm\n")
     with contextlib.redirect_stdout(io.StringIO()):
         check(
@@ -1125,6 +1266,7 @@ def _test_closed(check: Check, directory: Path) -> None:
     * `directory` (`Path`):
       The directory to test in.
     """
+    # Make four tasks and an issue.
     directory.mkdir()
     tasks: Items = Items(directory / "TASKS")
     issues: Items = Items(directory / "ISSUES")
@@ -1138,12 +1280,16 @@ def _test_closed(check: Check, directory: Path) -> None:
     ):
         tasks.create_item(number, title)
     issues.create_item("1", "Crash")
+
+    # Check a new, empty `Summary.md`.
     check(
         read_file(tasks.directories[(1,)] / "Summary.md")
         == "# Summary of `T.a` Alpha\n"
         and not has_summary(tasks.directories[(1,)]),
         "a new item has an empty Summary.md",
     )
+
+    # Check a `Summary.md` with more than its heading.
     write_file(
         tasks.directories[(1,)] / "Summary.md",
         "# Summary of `T.a` Alpha\n\nAlpha is done.\n",
@@ -1154,6 +1300,7 @@ def _test_closed(check: Check, directory: Path) -> None:
         and has_summary(issues.directories[(1,)]),
         "a Summary.md with more than its heading",
     )
+
     # Closed in this order, a day apart.
     collection: Items
     name: tuple[int]
@@ -1168,11 +1315,16 @@ def _test_closed(check: Check, directory: Path) -> None:
         collection.set_state(
             name, "Rejected" if collection is issues else "Closed"
         )
+
+        # Set the time of the state change.
         metadata: dict[str, object] = read_item(collection.directories[name])
         history: object = metadata["history"]
         if isinstance(history, list):
             history[-1]["time"] = f"2026-10-0{date}T12:00:00Z"
         write_item(collection.directories[name], metadata)
+
+    # Write `Startup.md` and `Closed.md` with three summaries, saving
+    # the summaries variable and restoring it afterwards.
     saved: str | None = os.environ.pop(SUMMARIES_VARIABLE, None)
     try:
         os.environ[SUMMARIES_VARIABLE] = "3"
@@ -1192,6 +1344,8 @@ def _test_closed(check: Check, directory: Path) -> None:
             "`ai_contexts TAG\nshow` shows the rest.\n\n- `T.d` Delta\n",
             "Closed.md lists the older closed items",
         )
+
+        # An invalid number of summaries uses the default.
         os.environ[SUMMARIES_VARIABLE] = "junk"
         write_startup([issues, tasks])
         check(
@@ -1204,6 +1358,8 @@ def _test_closed(check: Check, directory: Path) -> None:
         del os.environ[SUMMARIES_VARIABLE]
         if saved is not None:
             os.environ[SUMMARIES_VARIABLE] = saved  # pragma: no cover
+
+    # Check that renaming keeps the `Summary.md` heading.
     tasks.rename_item((3,), "Gamma Ray")
     check(
         read_file(tasks.directories[(3,)] / "Summary.md")
@@ -1217,6 +1373,8 @@ def _test_closed(check: Check, directory: Path) -> None:
         == "# Summary of `T.g` Gamma\nNotes.\n",
         "rename adds a missing Summary.md heading",
     )
+
+    # Check that loading adds a missing `Summary.md`.
     (tasks.directories[(3,)] / "Summary.md").unlink()
     with contextlib.redirect_stderr(io.StringIO()):
         reloaded: Items = Items(directory / "TASKS")
@@ -1225,6 +1383,8 @@ def _test_closed(check: Check, directory: Path) -> None:
         == "# Summary of `T.g` Gamma\n",
         "an item without a Summary.md gets one on load",
     )
+
+    # Check a closed item without a readable summary or history.
     (tasks.directories[(2,)] / "Summary.md").unlink()
     (tasks.directories[(2,)] / "Summary.md").mkdir()
     write_file(tasks.directories[(2,)] / ITEM_FILE, "[]")
@@ -1234,6 +1394,8 @@ def _test_closed(check: Check, directory: Path) -> None:
         == tasks.items[(2,)].updated,
         "a closed item without a readable summary or history",
     )
+
+    # Check failing to write or remove `Closed.md`.
     os.environ[SUMMARIES_VARIABLE] = "1"
     try:
         (directory / "TASKS" / "Closed.md").mkdir()
@@ -1247,15 +1409,21 @@ def _test_closed(check: Check, directory: Path) -> None:
         "Unable to write" in write_startup([issues, tasks]),
         "Closed.md can not be removed",
     )
+
+    # Check that there is no `Closed.md` without older closed items.
     (directory / "TASKS" / "Closed.md").rmdir()
     check(
         write_startup([issues, tasks]) == ""
         and not (directory / "TASKS" / "Closed.md").exists(),
         "no Closed.md without older closed items",
     )
+
+    # The remaining checks need permissions.
     if os.geteuid() == 0:
         # Permissions are not enforced for root.
         return  # pragma: no cover
+
+    # Report a `Summary.md` that can not be added.
     (issues.directories[(1,)] / "Summary.md").unlink()
     issues.directories[(1,)].chmod(0o500)
     errors: io.StringIO = io.StringIO()
@@ -1281,6 +1449,7 @@ def _test_checks(check: Check, directory: Path) -> None:
     * `directory` (`Path`):
       The directory to test in.
     """
+    # Create three items.
     directory.mkdir()
     items: Items = Items(directory / "TASKS")
     number: str
@@ -1300,7 +1469,10 @@ def _test_checks(check: Check, directory: Path) -> None:
             loaded: Items = Items(directory / "TASKS")
         return loaded, errors.getvalue()
 
+    # Check a sound collection.
     check(load()[1] == "", "no messages for a sound collection")
+
+    # Break some headings and share a tag.
     write_file(items.directories[(1,)] / "Details.md", "# 7 A\nText.\n")
     write_file(items.directories[(2,)] / "Details.md", "Notes only.\n")
     write_file(items.directories[(3,)] / "Details.md", "# 3 Cee\n")
@@ -1311,6 +1483,8 @@ def _test_checks(check: Check, directory: Path) -> None:
     write_file(items.directories[(2,)] / "Summary.md", "Body only.\n")
     metadata: dict[str, object] = read_item(items.directories[(3,)])
     write_item(items.directories[(3,)], {**metadata, "tag": "a"})
+
+    # Load, which fixes some problems and reports the rest.
     loaded: Items
     messages: str
     loaded, messages = load()
@@ -1342,14 +1516,20 @@ def _test_checks(check: Check, directory: Path) -> None:
         "Items 1, 3 in '" in messages and "share the tag T.a" in messages,
         "report a shared tag",
     )
+
+    # Check that fixes are made once and reports repeat.
     messages = load()[1]
     check(
         "Fixed" not in messages and "share the tag" in messages,
         "fixes are made once; reports repeat until fixed",
     )
+
+    # The remaining checks need permissions.
     if os.geteuid() == 0:
         # Permissions are not enforced for root.
         return  # pragma: no cover
+
+    # Report a check that fails.
     write_file(items.directories[(1,)] / "Summary.md", "stale\n")
     (items.directories[(1,)] / "Summary.md").chmod(0o400)
     try:
@@ -1370,9 +1550,12 @@ def _test_write_failures(check: Check, directory: Path) -> None:
     * `directory` (`Path`):
       The directory to test in.
     """
+    # These checks need permissions.
     if os.geteuid() == 0:
         # Permissions are not enforced for root.
         return  # pragma: no cover
+
+    # Make the test directory.
     directory.mkdir()
 
     def collection(name: str) -> Items:
@@ -1390,6 +1573,7 @@ def _test_write_failures(check: Check, directory: Path) -> None:
         items.create_item("2", "B")
         return items
 
+    # Check failing to save the time of a move or rename.
     notes: Items = collection("notes")
     (directory / "notes" / COLLECTION_FILE).chmod(0o400)
     with (
@@ -1404,6 +1588,8 @@ def _test_write_failures(check: Check, directory: Path) -> None:
             "the time of a move or rename can not be saved",
         )
     (directory / "notes" / COLLECTION_FILE).chmod(0o600)
+
+    # Make a move and a rename that can not be done.
     commands: Items = collection("commands")
     (commands.directories[(2,)] / "Details.md").chmod(0o400)
     (directory / "commands" / "1_Taken").mkdir()
@@ -1420,6 +1606,7 @@ def _test_write_failures(check: Check, directory: Path) -> None:
         """
         return "y"
 
+    # Check that a confirmed move or rename can still fail.
     with (
         contextlib.redirect_stdout(io.StringIO()),
         contextlib.redirect_stderr(io.StringIO()),
@@ -1431,6 +1618,8 @@ def _test_write_failures(check: Check, directory: Path) -> None:
             in commands.rename_command(["1", "to", "Taken"], yes),
             "a confirmed move or rename can still fail",
         )
+
+    # Check that there is no renumbering without a renumber file.
     marker: Items = collection("marker")
     (directory / "marker").chmod(0o500)
     try:
@@ -1442,12 +1631,16 @@ def _test_write_failures(check: Check, directory: Path) -> None:
         )
     finally:
         (directory / "marker").chmod(0o700)
+
+    # Check a move that can not renumber.
     move: Items = collection("move")
     (move.directories[(2,)] / "Details.md").chmod(0o400)
     check(
         "Unable to renumber" in str(move.move_items([(1,)], "after", (2,))),
         "move can not renumber",
     )
+
+    # Check a create that can not renumber.
     create: Items = collection("create")
     (create.directories[(1,)] / "Details.md").chmod(0o400)
     check(
@@ -1472,8 +1665,10 @@ def _test_snapshot_reminder(
     * `answers` (`list[str]`):
       The answers to the questions, in turn.
     """
+    # Save the delay variable, and restore it afterwards.
     saved: str | None = os.environ.pop(DELAY_VARIABLE, None)
     try:
+        # Check that the time of the last move or rename is saved.
         settings: object = json.loads(
             read_file(Path("TASKS") / COLLECTION_FILE)
         )
@@ -1483,6 +1678,8 @@ def _test_snapshot_reminder(
             not in ("-", "?"),
             "the time of the last move or rename is saved",
         )
+
+        # Check that there is no reminder soon after a move or rename.
         rename: tuple[str, ...] = ("t", "ren", "1", "to", "An", "item")
         move: tuple[str, ...] = ("t", "mo", "1.1", "1.2")
         check(
@@ -1490,6 +1687,8 @@ def _test_snapshot_reminder(
             and "snapshot" not in run(*move)[1],
             "no reminder soon after a move or rename",
         )
+
+        # Check renaming with several delays and answers.
         cases: list[tuple[str, list[str], int, str]] = [
             ("0", ["y"], 0, "snapshot"),
             ("0", ["n"], 1, "Not renamed"),
@@ -1508,11 +1707,15 @@ def _test_snapshot_reminder(
                 result[0] == code and text in result[1],
                 f"rename with delay {delay!r} and answers {given}",
             )
+
+        # Check a move that is refused and one that goes ahead.
         os.environ[DELAY_VARIABLE] = "0"
         answers[:] = ["n"]
         check(run(*move)[1].endswith("Not moved\n"), "a move is refused")
         answers[:] = ["y"]
         check("Nothing moved" in run(*move)[1], "a move goes ahead")
+
+        # Check that bad commands get no reminder.
         answers[:] = []
         arguments: tuple[str, str, str, str, str]
         for arguments, text in (
@@ -1525,6 +1728,8 @@ def _test_snapshot_reminder(
                 text in result[1] and "snapshot" not in result[1],
                 f"no reminder for a bad command {arguments}",
             )
+
+        # Check the reminder after a damaged time.
         del os.environ[DELAY_VARIABLE]
         write_file(
             Path("TASKS") / COLLECTION_FILE,
@@ -1551,6 +1756,7 @@ def _test_commands(check: Check, directory: Path) -> None:
     * `directory` (`Path`):
       The directory to test in.
     """
+    # Answer questions with the given answers, recording them.
     answers: list[str] = []
     questions: list[str] = []
 
@@ -1590,11 +1796,13 @@ def _test_commands(check: Check, directory: Path) -> None:
             code: int = Items.run_command(list(arguments), ask)
         return code, output.getvalue()
 
+    # Run the commands from inside a test directory.
     directory.mkdir()
     (directory / "plain").mkdir()
     original: Path = Path.cwd()
     os.chdir(directory)
     try:
+        # Run each command and check its exit code and output.
         answer: str
         arguments: tuple[str, ...]
         code: int
@@ -1757,19 +1965,27 @@ def _test_commands(check: Check, directory: Path) -> None:
                 result[0] == code and text in result[1],
                 f"command {' '.join(arguments)!r}",
             )
+
+        # Check the collections that were created.
         check(
             (directory / "TASKS" / COLLECTION_FILE).is_file()
             and (directory / "Issues" / COLLECTION_FILE).is_file()
             and not (directory / "plain" / COLLECTION_FILE).exists(),
             "create collections named as typed",
         )
+
+        # Check the question asked before creating a collection.
         check(
             questions[0]
             == f"Create collection directory '{Path.cwd() / 'TASKS'}'? "
             "[y/N] ",
             "ask before creating a collection",
         )
+
+        # Test the snapshot reminder.
         _test_snapshot_reminder(check, run, answers)
+
+        # Check that `Startup.md` covers every collection.
         check(
             read_file(Path("TASKS/Startup.md"))
             == "@1_An_item/Details.md\n@1_An_item/Context.md\n"
@@ -1778,6 +1994,9 @@ def _test_commands(check: Check, directory: Path) -> None:
             "@../Issues/1_Crash/Context.md\n",
             "commands write Startup.md for every collection",
         )
+
+        # Check searching upward, and creating a collection next to the
+        # others.
         os.chdir(directory / "TASKS" / "1_An_item")
         check(run("t", "ls")[1].startswith("1  "), "search upward")
         answers[:] = ["y"]
@@ -1790,6 +2009,8 @@ def _test_commands(check: Check, directory: Path) -> None:
             "\n2 - Notes   N.  no items\n" in run()[1],
             "an empty collection is listed with no items",
         )
+
+        # Reject a collection whose tag prefix is taken.
         answers[:] = ["y"]
         code, text = run("tools", "create")
         check(
@@ -1798,6 +2019,7 @@ def _test_commands(check: Check, directory: Path) -> None:
             and not (directory / "tools").exists(),
             "collections must have different tag prefixes",
         )
+
         # Only a collection made by hand can clash.
         (directory / "Tools").mkdir()
         write_file(directory / "Tools" / COLLECTION_FILE, "{}\n")
@@ -1807,6 +2029,9 @@ def _test_commands(check: Check, directory: Path) -> None:
             "ambiguous collection",
         )
         check(run("ta", "ls")[0] == 0, "unambiguous collection")
+
+        # Check creating a collection when `Startup.md` can not be
+        # written.
         startup: Path = directory / "TASKS" / "Startup.md"
         saved: str = read_file(startup)
         startup.unlink()
@@ -1819,9 +2044,13 @@ def _test_commands(check: Check, directory: Path) -> None:
         )
         startup.rmdir()
         write_file(startup, saved)
+
+        # The remaining checks need permissions.
         if os.geteuid() == 0:
             # Permissions are not enforced for root.
             return  # pragma: no cover
+
+        # Check a command in a read-only collection.
         (directory / "Tools").chmod(0o500)
         try:
             code, text = run("to", "ls")
@@ -1831,6 +2060,8 @@ def _test_commands(check: Check, directory: Path) -> None:
             )
         finally:
             (directory / "Tools").chmod(0o700)
+
+        # Check creating a collection with a read-only TASKS.
         (directory / "TASKS").chmod(0o500)
         answers[:] = ["y"]
         try:
@@ -1844,6 +2075,8 @@ def _test_commands(check: Check, directory: Path) -> None:
             )
         finally:
             (directory / "TASKS").chmod(0o700)
+
+        # Check creating a collection in a read-only directory.
         (directory).chmod(0o500)
         answers[:] = ["y"]
         try:
@@ -1907,6 +2140,7 @@ def _runner(answers: list[str]) -> Callable[..., tuple[int, str]]:
             code: int = Items.run_command(list(arguments), ask)
         return code, output.getvalue()
 
+    # Return the function that runs commands.
     return run
 
 
@@ -1921,6 +2155,8 @@ def _test_types(check: Check, directory: Path) -> None:
     * `directory` (`Path`):
       The directory to test in.
     """
+    # Run the commands from inside the test directory, with a rule
+    # source.
     answers: list[str] = []
     run: Callable[..., tuple[int, str]] = _runner(answers)
     original: Path = Path.cwd()
@@ -1930,6 +2166,7 @@ def _test_types(check: Check, directory: Path) -> None:
         directory / "sources" / "Version_Control_Rules.md", "# Use hg\n"
     )
     try:
+        # Run each command and check its exit code and output.
         answer: str
         arguments: tuple[str, ...]
         code: int
@@ -1977,12 +2214,17 @@ def _test_types(check: Check, directory: Path) -> None:
                 result[0] == code and text in result[1],
                 f"type command {' '.join(arguments)!r}",
             )
+
+        # Check the files of a rule.
         rule: Path = directory / "RULES" / "1_Version_Rules"
         check(
             sorted(path.name for path in rule.iterdir())
             == [ITEM_FILE, "Details.md", "Version_Control_Rules.md"],
             "a rule has only a Details.md and its copy",
         )
+
+        # Check where the type is kept, and that rules are not in
+        # `Startup.md`.
         check(
             json.loads(read_file(directory / "RULES" / COLLECTION_FILE))[
                 "type"
@@ -1995,6 +2237,8 @@ def _test_types(check: Check, directory: Path) -> None:
             == "@1_A_task/Details.md\n@1_A_task/Context.md\n",
             "rules are not in Startup.md",
         )
+
+        # Skip a rule in a state of another type.
         metadata: dict[str, object] = read_item(rule)
         write_item(rule, {**metadata, "state": "Open"})
         code, text = run("r", "ls")
@@ -2005,6 +2249,8 @@ def _test_types(check: Check, directory: Path) -> None:
             "skip a rule in a state of another type",
         )
         write_item(rule, metadata)
+
+        # Report bad collection settings.
         settings_path: Path = directory / "RULES" / COLLECTION_FILE
         settings: str = read_file(settings_path)
         problem: str
@@ -2021,9 +2267,13 @@ def _test_types(check: Check, directory: Path) -> None:
                 f"a collection with the settings {text!r}",
             )
         write_file(settings_path, settings)
+
+        # The remaining checks need permissions.
         if os.geteuid() == 0:
             # Permissions are not enforced for root.
             return  # pragma: no cover
+
+        # Report settings that can not be read.
         settings_path.chmod(0o000)
         try:
             code, text = run("r", "ls")
@@ -2033,6 +2283,8 @@ def _test_types(check: Check, directory: Path) -> None:
             )
         finally:
             settings_path.chmod(0o600)
+
+        # Report a type that can not be saved.
         empty: Path = directory / "Empty" / COLLECTION_FILE
         empty.parent.mkdir()
         write_file(empty, f'{{"version": "{FORMAT_VERSION}"}}\n')
@@ -2063,6 +2315,7 @@ def _test_rules(check: Check, directory: Path) -> None:
     * `directory` (`Path`):
       The directory to test in.
     """
+    # Make a project and the rule sources it shares.
     answers: list[str] = []
     run: Callable[..., tuple[int, str]] = _runner(answers)
     project: Path = directory / "project"
@@ -2077,11 +2330,15 @@ def _test_rules(check: Check, directory: Path) -> None:
     for name in ("other.md", "last.md", "code.md", "fenced.md"):
         write_file(shared / name, "# Imported\n")
     (shared / "Link_Rule.md").symlink_to("Alpha_Rule.md")
+
+    # Run the commands from inside the project.
     original: Path = Path.cwd()
     os.chdir(project)
     rules: Path = project / "RULES"
     active: Path = rules / "Active_Rules.md"
     try:
+        # Create some rules, checking each command's exit code and
+        # output.
         answer: str
         arguments: tuple[str, ...]
         code: int
@@ -2119,6 +2376,8 @@ def _test_rules(check: Check, directory: Path) -> None:
                 result[0] == code and text in result[1],
                 f"rules command {' '.join(arguments)!r}",
             )
+
+        # Check the copies of the sources.
         rule: Path = rules / "2_Alpha_Rule"
         copy: Path = rule / "Alpha_Rule.md"
         metadata: dict[str, object] = read_item(rule)
@@ -2137,6 +2396,8 @@ def _test_rules(check: Check, directory: Path) -> None:
             == read_file(copy),
             "a source's directories are resolved, but not its file",
         )
+
+        # Check activating rules.
         check(read_file(active) == "", "no Active rules")
         check(
             run("r", "act", "2")[0] == 0
@@ -2149,10 +2410,14 @@ def _test_rules(check: Check, directory: Path) -> None:
             == "@1_Link_Rule/Link_Rule.md\n@2_Alpha_Rule/Alpha_Rule.md\n",
             "Active_Rules.md is in number order",
         )
+
+        # Check that rules are not in `Startup.md`.
         check(
             "@" not in read_file(project / "TASKS" / "Startup.md"),
             "rules are not in Startup.md",
         )
+
+        # Show a rule's source.
         code, text = run("r", "sh", "R.ar")
         check(
             code == 0
@@ -2160,6 +2425,8 @@ def _test_rules(check: Check, directory: Path) -> None:
             and "Refreshed: 2" in text,
             "show a rule's source",
         )
+
+        # Copy a changed source again, but not an unchanged one.
         write_file(shared / "Alpha_Rule.md", "# A\n\nAlways do A twice.\n")
         code, text = run("r", "ls")
         check(
@@ -2174,6 +2441,8 @@ def _test_rules(check: Check, directory: Path) -> None:
             run("r", "refresh", "2") == (0, "R.ar is up to date\n"),
             "refresh an unchanged rule",
         )
+
+        # Leave an edited copy alone, and then refresh it.
         copy.chmod(0o644)
         write_file(copy, "# A\n\nEdited.\n")
         write_file(shared / "Alpha_Rule.md", "# A\n\nAlways do A thrice.\n")
@@ -2206,6 +2475,8 @@ def _test_rules(check: Check, directory: Path) -> None:
             and "thrice" in read_file(copy),
             "refresh an edited copy, answering yes",
         )
+
+        # Record the hash of a copy that matches its source.
         metadata = read_item(rule)
         del metadata["sha256"]
         write_item(rule, metadata)
@@ -2216,6 +2487,8 @@ def _test_rules(check: Check, directory: Path) -> None:
             and read_item(rule)["sha256"] == sha256_of(copy),
             "record the hash of a copy that matches its source",
         )
+
+        # Check bad `refresh` and `source` commands, and a new source.
         for answer, arguments, code, text in (
             ("", ("r", "refresh"), 1, "Usage"),
             ("", ("r", "refresh", "x"), 1, "Invalid"),
@@ -2239,6 +2512,8 @@ def _test_rules(check: Check, directory: Path) -> None:
                 result[0] == code and text in result[1],
                 f"rules command {' '.join(arguments)!r}",
             )
+
+        # Check that a new source replaces the old copy.
         check(
             sorted(path.name for path in (rules / "1_Link_Rule").iterdir())
             == [ITEM_FILE, "Beta_Rule.md", "Details.md"]
@@ -2246,6 +2521,9 @@ def _test_rules(check: Check, directory: Path) -> None:
             == "@1_Link_Rule/Beta_Rule.md\n@2_Alpha_Rule/Alpha_Rule.md\n",
             "a new source replaces the old copy",
         )
+
+        # Report `@` imports in a copy, and a rule that `CLAUDE.md` also
+        # imports.
         write_file(
             shared / "Beta_Rule.md",
             "# B\n\nSee @other.md and `@code.md`, mail a@b.c.\n"
@@ -2268,6 +2546,8 @@ def _test_rules(check: Check, directory: Path) -> None:
             "also imports" in text,
             "report a rule that CLAUDE.md also imports",
         )
+
+        # Keep the copy of a missing source.
         (shared / "Beta_Rule.md").unlink()
         code, text = run("r", "ls")
         check(
@@ -2275,6 +2555,8 @@ def _test_rules(check: Check, directory: Path) -> None:
             "copy is kept" in text,
             "a missing source keeps its copy",
         )
+
+        # Check an Active rule without a copy.
         (rules / "1_Link_Rule" / "Beta_Rule.md").unlink()
         code, text = run("r", "ls")
         check(
@@ -2289,6 +2571,8 @@ def _test_rules(check: Check, directory: Path) -> None:
             and run("r", "deact", "1")[0] == 0,
             "only a rule with a copy can be made Active",
         )
+
+        # Check a rule without a source.
         metadata = read_item(rules / "1_Link_Rule")
         key: str
         for key in ("source", "sha256", "refreshed"):
@@ -2310,6 +2594,8 @@ def _test_rules(check: Check, directory: Path) -> None:
             "Source:    -\nSHA-256:   -\nRefreshed: -\n" in text,
             "show a rule without a source",
         )
+
+        # Test failing to read or write rules.
         _test_rule_failures(check, run, rules)
     finally:
         os.chdir(original)
@@ -2331,6 +2617,7 @@ def _test_rule_failures(
     * `rules` (`Path`):
       The rules collection; rule 2 (`R.ar`) has a source.
     """
+    # Check failing to write `Active_Rules.md`.
     active: Path = rules / "Active_Rules.md"
     active.unlink()
     active.mkdir()
@@ -2342,9 +2629,13 @@ def _test_rule_failures(
         "Active_Rules.md can not be written",
     )
     active.rmdir()
+
+    # The remaining checks need permissions.
     if os.geteuid() == 0:
         # Permissions are not enforced for root.
         return  # pragma: no cover
+
+    # Check a copy that can not be read.
     rule: Path = rules / "2_Alpha_Rule"
     copy: Path = rule / "Alpha_Rule.md"
     copy.chmod(0o000)
@@ -2357,6 +2648,8 @@ def _test_rule_failures(
         )
     finally:
         copy.chmod(0o444)
+
+    # Check a copy that can not be written.
     (rule / ".copy.tmp" / "x").mkdir(parents=True)
     code, text = run("r", "source", "2", "../shared/Alpha_Rule.md")
     check(
@@ -2364,6 +2657,9 @@ def _test_rule_failures(
         "a copy that can not be written",
     )
     shutil.rmtree(rule / ".copy.tmp")
+
+    # Check a source that can not be recorded, and then setting it
+    # again.
     (rule / ITEM_FILE).chmod(0o400)
     try:
         code, text = run("r", "source", "2", "../shared/Alpha_Rule.md")
@@ -2391,6 +2687,7 @@ def _test_transfer(check: Check, directory: Path) -> None:
     * `directory` (`Path`):
       The directory to test in.
     """
+    # Run the commands from inside the test directory.
     answers: list[str] = []
     run: Callable[..., tuple[int, str]] = _runner(answers)
     original: Path = Path.cwd()
@@ -2398,6 +2695,7 @@ def _test_transfer(check: Check, directory: Path) -> None:
     tasks: Path = directory / "TASKS"
     issues: Path = directory / "ISSUES"
     try:
+        # Transfer items, checking each command's exit code and output.
         answer: str
         arguments: tuple[str, ...]
         code: int
@@ -2489,6 +2787,8 @@ def _test_transfer(check: Check, directory: Path) -> None:
                 result[0] == code and text in result[1],
                 f"transfer command {' '.join(arguments)!r}",
             )
+
+        # Check the files and history of a transferred item.
         moved: Path = tasks / "1_First_bug"
         moves: object = read_item(moved)["moves"]
         check(
@@ -2501,10 +2801,14 @@ def _test_transfer(check: Check, directory: Path) -> None:
             and [move["to"] for move in moves] == ["I.fb", "T.fb"],
             "a transfer fixes the headings and records the moves",
         )
+
+        # Check that `Startup.md` follows a transfer.
         check(
             read_file(tasks / "Startup.md").count("@../ISSUES/") == 2,
             "Startup.md follows a transfer",
         )
+
+        # Check that `transfer_items()` checks the transfer.
         check(
             isinstance(
                 Items(tasks).transfer_items([(9,)], Items(issues), "", "3"),
@@ -2512,6 +2816,8 @@ def _test_transfer(check: Check, directory: Path) -> None:
             ),
             "transfer_items() checks the transfer",
         )
+
+        # Test failing to read or write a transfer.
         _test_transfer_failures(check, run, answers, tasks, issues)
     finally:
         os.chdir(original)
@@ -2558,6 +2864,7 @@ def _test_transfer_failures(
         """
         return next(collection.glob(f"*_{title}"))
 
+    # Check a transfer to a collection that can not be loaded.
     bad: Path = tasks.parent / "Bad"
     bad.mkdir()
     write_file(bad / COLLECTION_FILE, "[]\n")
@@ -2566,6 +2873,8 @@ def _test_transfer_failures(
         "transfer to a collection that can not be loaded",
     )
     shutil.rmtree(bad)
+
+    # Report transfer plans that can not be read.
     marker: Path = tasks / ".transfer.json"
     text: str
     for text in ("[]", '{"phase": 1}', '{"phase": "x", "items": []}'):
@@ -2576,9 +2885,14 @@ def _test_transfer_failures(
             f"a transfer plan {text!r} that can not be read",
         )
     marker.unlink()
+
+    # The remaining checks need permissions.
     if os.geteuid() == 0:
         # Permissions are not enforced for root.
         return  # pragma: no cover
+
+    # Interrupt transfers by making a file read-only, and check that the
+    # next command finishes them.
     collection: Path
     title: str
     file_name: str
@@ -2599,6 +2913,8 @@ def _test_transfer_failures(
         # The directories are found by title, since they are renumbered.
         path: Path = where(collection, title) / file_name
         path.chmod(0o500 if path.is_dir() else 0o400)
+
+        # Run the transfer, which fails, and restore the permissions.
         answers[:] = ["y"]
         try:
             code: int
@@ -2610,6 +2926,9 @@ def _test_transfer_failures(
             for found in [path, *tasks.parent.rglob(path.name)]:
                 if found.exists():
                     found.chmod(0o700 if found.is_dir() else 0o600)
+
+        # Check that the transfer failed, and that the next command
+        # finishes it.
         check(
             code == 1 and "Unable to" in output,
             f"transfer {' '.join(arguments)} when {path.name} can not be "
@@ -2623,6 +2942,8 @@ def _test_transfer_failures(
             in output,
             f"finish the transfer {' '.join(arguments)}",
         )
+
+    # Check that the finished transfers leave no gaps.
     check(
         sorted(path.name for path in issues.glob("[0-9]*"))
         == [
@@ -2636,6 +2957,8 @@ def _test_transfer_failures(
         and not any(tasks.glob("[0-9]*")),
         "finished transfers leave no gaps",
     )
+
+    # Check a transfer whose time can not be saved.
     (issues / COLLECTION_FILE).chmod(0o400)
     answers[:] = ["y"]
     try:
@@ -2646,6 +2969,8 @@ def _test_transfer_failures(
         code == 1 and "Unable to write" in output,
         "a transfer whose time can not be saved",
     )
+
+    # Check that a transfer updates the references to every old tag.
     notes: Path = tasks.parent / "notes.md"
     write_file(notes, "Fix I.fb and its child I.co, not I.fbx.\n")
     answers[:] = ["y", "y"]
@@ -2657,6 +2982,8 @@ def _test_transfer_failures(
         and read_file(notes) == "Fix T.fb and its child T.co, not I.fbx.\n",
         "a transfer updates the references to every old tag",
     )
+
+    # Check a transfer that does not update the references.
     answers[:] = ["n"]
     code, output = run("t", "tr", "T.fb", "i")
     check(
@@ -2682,6 +3009,7 @@ def _test_transfer_recovery(check: Check, directory: Path) -> None:
     * `directory` (`Path`):
       The directory to test in.
     """
+    # Interrupt two transfers after each of their steps.
     name: tuple[int]
     place: str
     word: str
@@ -2724,9 +3052,13 @@ def _test_transfer_recovery(check: Check, directory: Path) -> None:
             word,
             sorted(expected),
         )
+
+    # The remaining checks need permissions.
     if os.geteuid() == 0:
         # Permissions are not enforced for root.
         return  # pragma: no cover
+
+    # Load a collection whose parent can not be listed.
     parent: Path = directory / "1" / "0"
     parent.chmod(0o300)
     try:
@@ -2766,9 +3098,11 @@ def _test_interrupted_transfer(
     * `expected` (`list[str]`):
       The ISSUES items after the transfer.
     """
+    # Transfer in a new directory for each number of steps.
     directory.mkdir()
     limit: int
     for limit in range(100):
+        # Make the collections and their items.
         root: Path = directory / str(limit)
         root.mkdir()
         tasks: Items = Items(root / "TASKS")
@@ -2786,6 +3120,8 @@ def _test_interrupted_transfer(
             (issues, "2", "Something"),
         ):
             collection.create_item(number, title)
+
+        # Interrupt the transfer after `limit` steps.
         os.environ[INTERRUPT_VARIABLE] = str(limit)
         interrupted: bool = False
         try:
@@ -2794,6 +3130,9 @@ def _test_interrupted_transfer(
             interrupted = True
         finally:
             del os.environ[INTERRUPT_VARIABLE]
+
+        # Load, which finishes any interrupted transfer, and check the
+        # items.
         errors: io.StringIO = io.StringIO()
         with contextlib.redirect_stderr(errors):
             Items(root / "TASKS")
@@ -2812,8 +3151,12 @@ def _test_interrupted_transfer(
             == interrupted,
             f"finish a transfer of {name} interrupted after {limit} steps",
         )
+
+        # Stop once the transfer is no longer interrupted.
         if not interrupted:
             break
+
+    # Check the number of steps.
     check(limit > 3, f"a transfer of {name} has several steps")
 
 
@@ -2828,6 +3171,7 @@ def _test_errors(check: Check, directory: Path) -> None:
     * `directory` (`Path`):
       The directory to test in.
     """
+    # Skip an item without a state file.
     directory.mkdir()
     items: Items = Items(directory / "TASKS")
     items.create_item("1", "One")
@@ -2837,6 +3181,8 @@ def _test_errors(check: Check, directory: Path) -> None:
     with contextlib.redirect_stderr(errors):
         items = Items(directory / "TASKS")
     check("2_No_state" in errors.getvalue(), "skip missing state file")
+
+    # Check failing to read or write an item file.
     state_path: Path = directory / "TASKS" / "1_One" / ITEM_FILE
     state_path.unlink()
     state_path.mkdir()
@@ -2852,11 +3198,15 @@ def _test_errors(check: Check, directory: Path) -> None:
         "Unable to write" in str(items.set_priority((1,), 2)),
         "set_priority write failure",
     )
+
+    # Check failing to write `Startup.md`.
     (directory / "TASKS" / "Startup.md").mkdir()
     check(
         "Unable to write" in write_startup([items]),
         "write_startup failure",
     )
+
+    # Reject a bad `.ai_contexts.json`.
     text: str
     message: str
     for text, message in (
@@ -2871,9 +3221,13 @@ def _test_errors(check: Check, directory: Path) -> None:
                 message in Items(bad).error,
                 f"reject .ai_contexts.json {text!r}",
             )
+
+    # The remaining checks need permissions.
     if os.geteuid() == 0:
         # Permissions are not enforced for root.
         return  # pragma: no cover
+
+    # Check a read-only collection.
     read_only: Path = directory / "read_only"
     read_only.mkdir(mode=0o500)
     try:
@@ -2886,6 +3240,8 @@ def _test_errors(check: Check, directory: Path) -> None:
         )
     finally:
         read_only.chmod(0o700)
+
+    # Check a collection file that can not be written.
     write_file(read_only / COLLECTION_FILE, "{}\n")
     (read_only / COLLECTION_FILE).chmod(0o400)
     errors = io.StringIO()
@@ -2901,6 +3257,8 @@ def _test_errors(check: Check, directory: Path) -> None:
         "set_feature write failure",
     )
     (read_only / COLLECTION_FILE).chmod(0o600)
+
+    # Check a missing tag that can not be added.
     untagged: Path = read_only / "1_Untagged"
     untagged.mkdir()
     write_item(untagged, new_metadata("Open", "2026-01-01T00:00:00Z"))
@@ -2927,11 +3285,14 @@ def _test_old_collection_file(check: Check, directory: Path) -> None:
     * `directory` (`Path`):
       The directory to test in.
     """
+    # Make collections in the old and new formats.
     name: str
     for name in ("TASKS", "ISSUES", "plain"):
         (directory / name).mkdir()
     write_file(directory / "TASKS" / OLD_COLLECTION_FILE, '{"a": 1}\n')
     write_file(directory / "ISSUES" / COLLECTION_FILE, "{}\n")
+
+    # Check finding them, which renames the old file.
     check(
         find_collections(directory / "plain")
         == [directory / "ISSUES", directory / "TASKS"],
@@ -2942,6 +3303,7 @@ def _test_old_collection_file(check: Check, directory: Path) -> None:
         and not (directory / "TASKS" / OLD_COLLECTION_FILE).exists(),
         "rename an old .tracker.json",
     )
+
     # An old file next to a new one is left alone.
     write_file(directory / "ISSUES" / OLD_COLLECTION_FILE, "[]\n")
     find_collections(directory)
@@ -2950,8 +3312,12 @@ def _test_old_collection_file(check: Check, directory: Path) -> None:
         and (directory / "ISSUES" / OLD_COLLECTION_FILE).is_file(),
         "keep a new .ai_contexts.json over an old .tracker.json",
     )
+
+    # The remaining checks need permissions.
     if os.geteuid() == 0:
         return  # pragma: no cover
+
+    # Report an old file that can not be renamed.
     locked: Path = directory / "locked" / "NOTES"
     locked.mkdir(parents=True)
     write_file(locked / OLD_COLLECTION_FILE, "{}\n")
@@ -2979,6 +3345,7 @@ def _test_rules_files(check: Check, directory: Path) -> None:
     * `directory` (`Path`):
       The directory to test in.
     """
+    # Run the commands from inside the test directory.
     answers: list[str] = ["y", "y"]
     run: Callable[..., tuple[int, str]] = _runner(answers)
     original: Path = Path.cwd()
@@ -3037,6 +3404,8 @@ def _test_rules_files(check: Check, directory: Path) -> None:
             and "Code.md" not in text,
             "report a CLAUDE.md import of a missing file",
         )
+
+        # A command that fails does not check `CLAUDE.md`.
         code, text = run("t", "bad")
         check(
             code == 1 and "@Missing.md" not in text,
@@ -3052,6 +3421,8 @@ def _test_rules_files(check: Check, directory: Path) -> None:
             "a rules file that can not be written",
         )
         issues.rmdir()
+
+        # A new collection reports a rules file that can not be written.
         answers.append("y")
         tasks.unlink()
         tasks.mkdir()
@@ -3075,6 +3446,7 @@ def _test_version_control_root(check: Check, directory: Path) -> None:
     * `directory` (`Path`):
       The directory to test in.
     """
+    # Make collections inside and outside repositories.
     relative: str
     for relative in (
         "TASKS",
@@ -3090,6 +3462,8 @@ def _test_version_control_root(check: Check, directory: Path) -> None:
     write_file(directory / "TASKS" / COLLECTION_FILE, "{}\n")
     write_file(directory / "hg_repo" / "ISSUES" / COLLECTION_FILE, "{}\n")
     (directory / "linked" / "LINK").symlink_to(directory / "TASKS")
+
+    # Check where the search stops.
     check(
         find_collections(directory / "git_repo" / "sub") == [],
         "the search for collections stops at a .git root",
@@ -3110,5 +3484,6 @@ def _test_version_control_root(check: Check, directory: Path) -> None:
     )
 
 
+# Run the tests when this file is run as a program.
 if __name__ == "__main__":
     sys.exit(test())

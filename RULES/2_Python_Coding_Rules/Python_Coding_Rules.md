@@ -1,5 +1,54 @@
 # Python Coding Rules
 
+## Type Hints and Tools
+
+* **ALL** Python variables should have a valid type hint.
+* Run `mypy --strict` (or at least `mypy --disallow-untyped-defs`), since
+  plain `mypy` skips functions with no type hints.
+* Use `Any` only as a last resort.
+* Quoted type hints (e.g. `"MyClass"`) are forward references for types
+  not yet defined; `from __future__ import annotations` avoids the quotes.
+* To discover an expression's type, temporarily insert
+  `reveal_type(expr)`, run `mypy`, then remove it.
+* To give a long type a short name, use a type alias
+  (`type Matrix = list[list[float]]` in Python 3.12+, or
+  `Matrix: TypeAlias = list[list[float]]` before that).
+* Use `NewType` only to create a distinct type (e.g.
+  `UserId = NewType("UserId", int)`) that `mypy` keeps separate from its
+  base type.
+* Run `ruff check` (or `ruff check --fix` to fix simple errors).
+* Run `ruff format --line-length 79` to format code consistently.
+* No tool is run to check the PEP 8 72 character limit on docstring and
+  comment lines (`ruff` rule `W505` could, but it is not used).  Claude
+  is responsible for keeping those lines to 72 characters or fewer.
+
+## Comments and Formatting
+
+* Write comments and docstrings as English sentences: first word
+  capitalized, ending with a period (or question mark).  Partial
+  sentences that end in a `:` are allowed as well.  No misspelled
+  words.
+* PEP 8 line lengths: code lines 79 characters or fewer; docstring and
+  comment lines 72 characters or fewer.  Exceptions are allowed where
+  a line cannot reasonably be wrapped (e.g. long hyperlinks, code
+  blocks).
+* Enclose variable, function, class, and method names in back quotes
+  inside comments (e.g. `my_func`, `my_class`, `my_variable`).
+* Separate blocks of code with blank lines, and put a 1- or 2-line `#`
+  comment at the front of each block.
+
+## Test Suites
+
+A test suite file is defined as one of the following:
+
+* It resides in a directory named `tests/`.
+* It matches either `test_*.py` or `*_test.py`.
+
+Test suite files are exempt from the rules in the `Python` section
+and every section after it.
+
+## Python
+
 These rules are based on `Misc_Files/python_with_markdown.md`, which has
 background and references.  Where the two differ, these rules take
 precedence.  Docstrings and comments are written in Markdown, following
@@ -189,40 +238,3 @@ class SampleClass:
         self.egg_sizes = [1.0] * self.eggs
         self.total_size = sum(self.egg_sizes)
 ```
-
-## Comments and Formatting
-
-* Write comments and docstrings as English sentences: first word
-  capitalized, ending with a period (or question mark).  Partial
-  sentences that end in a `:` are allowed as well.  No misspelled
-  words.
-* PEP 8 line lengths: code lines 79 characters or fewer; docstring and
-  comment lines 72 characters or fewer.  Exceptions are allowed where
-  a line cannot reasonably be wrapped (e.g. long hyperlinks, code
-  blocks).
-* Enclose variable, function, class, and method names in back quotes
-  inside comments (e.g. `my_func`, `my_class`, `my_variable`).
-* Separate blocks of code with blank lines, and put a 1- or 2-line `#`
-  comment at the front of each block.
-
-## Type Hints and Tools
-
-* **ALL** Python variables should have a valid type hint.
-* Run `mypy --strict` (or at least `mypy --disallow-untyped-defs`), since
-  plain `mypy` skips functions with no type hints.
-* Use `Any` only as a last resort.
-* Quoted type hints (e.g. `"MyClass"`) are forward references for types
-  not yet defined; `from __future__ import annotations` avoids the quotes.
-* To discover an expression's type, temporarily insert
-  `reveal_type(expr)`, run `mypy`, then remove it.
-* To give a long type a short name, use a type alias
-  (`type Matrix = list[list[float]]` in Python 3.12+, or
-  `Matrix: TypeAlias = list[list[float]]` before that).
-* Use `NewType` only to create a distinct type (e.g.
-  `UserId = NewType("UserId", int)`) that `mypy` keeps separate from its
-  base type.
-* Run `ruff check` (or `ruff check --fix` to fix simple errors).
-* Run `ruff format --line-length 79` to format code consistently.
-* No tool is run to check the PEP 8 72 character limit on docstring and
-  comment lines (`ruff` rule `W505` could, but it is not used).  Claude
-  is responsible for keeping those lines to 72 characters or fewer.
