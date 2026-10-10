@@ -1,0 +1,20 @@
+{
+  "state": "Closed",
+  "created": "2026-10-10T14:56:01Z",
+  "updated": "2026-10-10T15:14:23Z",
+  "history": [
+    {
+      "state": "Pending",
+      "time": "2026-10-10T14:56:01Z"
+    },
+    {
+      "state": "Open",
+      "time": "2026-10-10T14:58:43Z"
+    },
+    {
+      "state": "Closed",
+      "time": "2026-10-10T15:14:23Z"
+    }
+  ],
+  "tag": "wapfuar"
+}

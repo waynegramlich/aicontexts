@@ -1,3 +1,4 @@
+@../ISSUES/4_Warn_about_project_files_used_as_rules/Summary.md
 @10.4_Block_comment_the_test_suite/Summary.md
 @../ISSUES/2_Limit_directory_searches_in_large_trees/Summary.md
 @../ISSUES/3_Generate_the_AI_Contexts_Rules_file/Summary.md

@@ -225,9 +225,13 @@ not import a file from outside the project without approval):
 ```
 aic RULES create
 aic r type rules
-aic r create 1 ../claude_code_rules/*.md
+aic r create 1 ../claude_code_rules/[A-Z]*_Rules.md
 aic r activate R.vcr
 ```
+
+`aic` refuses to make a rule from a `CLAUDE.md` file, and asks before
+using a file that looks like it is about the project (like `README.md`)
+or that imports other files.
 
 A new rule is InActive until it is activated.  Every time `ai_contexts`
 runs, it refreshes the copies from their source files and rewrites

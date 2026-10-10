@@ -111,6 +111,8 @@ def test() -> int:
     with tempfile.TemporaryDirectory() as temporary:
         _test_rules(check, Path(temporary))
     with tempfile.TemporaryDirectory() as temporary:
+        _test_rule_doubts(check, Path(temporary))
+    with tempfile.TemporaryDirectory() as temporary:
         _test_transfer(check, Path(temporary))
     with tempfile.TemporaryDirectory() as temporary:
         _test_transfer_recovery(check, Path(temporary))
@@ -2368,7 +2370,6 @@ def _test_rules(check: Check, directory: Path) -> None:
                 "1  InActive   R.lr  Link Rule\n",
             ),
             ("", ("r", "cr", "4", "../shared/Details.md"), 1, "can not be"),
-            ("", ("r", "del", "4"), 0, "Deleted"),
         ):
             answers[:] = [answer] if answer else []
             result: tuple[int, str] = run(*arguments)
@@ -2673,6 +2674,173 @@ def _test_rule_failures(
         run("r", "source", "2", "../shared/Alpha_Rule.md")[0] == 0
         and copy.is_file(),
         "set a source again after failures",
+    )
+
+
+# Function `_test_rule_doubts()`:
+def _test_rule_doubts(check: Check, directory: Path) -> None:
+    """Test files that can not be, or may not be meant to be, rules.
+
+    The collections are in `directory/project` and the sources in
+    `directory/shared`.
+
+    Arguments:
+    * `check` (`Check`):
+      Records a check: a condition that should be true and its
+      description.
+    * `directory` (`Path`):
+      The directory to test in.
+    """
+    # Make a project and some sources, like a directory of rules with
+    # its own `CLAUDE.md` and `README.md`.
+    answers: list[str] = []
+    run: Callable[..., tuple[int, str]] = _runner(answers)
+    project: Path = directory / "project"
+    shared: Path = directory / "shared"
+    project.mkdir()
+    shared.mkdir()
+    write_file(shared / "Alpha_Rule.md", "# A\n")
+    write_file(shared / "Beta_Rule.md", "# B\n\n`@Alpha_Rule.md` @none.md\n")
+    write_file(shared / "Gamma_Rule.md", "# G\n\n@Alpha_Rule.md\n")
+    write_file(shared / "README.md", "# Rules\n")
+    write_file(shared / "CLAUDE.md", "@Alpha_Rule.md\n")
+    write_file(shared / "claude.local.md", "# Local\n")
+
+    # Run the commands from inside the project.
+    original: Path = Path.cwd()
+    os.chdir(project)
+    rules: Path = project / "RULES"
+    try:
+        answers[:] = ["y"]
+        run("RULES", "create")
+        run("r", "type", "rules")
+
+        # A `CLAUDE.md` file is refused, and nothing is created.
+        code: int
+        text: str
+        code, text = run("r", "cr", "1", *_shared_files(shared))
+        check(
+            code == 1
+            and "Claude Code loads CLAUDE.md files by itself" in text
+            and not (rules / "1_Alpha_Rule").exists(),
+            "a CLAUDE.md file can not be a rule",
+        )
+        check(
+            run("r", "cr", "1", "../shared/claude.local.md")[0] == 1,
+            "a claude.local.md file can not be a rule",
+        )
+        for name in ("Notes.txt", "Rules.MD", ".md"):
+            write_file(shared / name, "# Not Markdown\n")
+            code, text = run("r", "cr", "1", f"../shared/{name}")
+            check(
+                code == 1 and "can not" in text,
+                f"a rule's source {name!r} must end in .md",
+            )
+
+        # Doubtful files are listed in one question, and left out by
+        # default.
+        questions: list[str] = []
+        doubtful: list[str] = [
+            "../shared/Alpha_Rule.md",
+            "../shared/Beta_Rule.md",
+            "../shared/Gamma_Rule.md",
+            "../shared/README.md",
+        ]
+
+        def ask(question: str) -> str:
+            """Record a question and answer it with EOF.
+
+            Arguments:
+            * `question` (`str`):
+              The question.
+
+            Returns:
+            * (`str`): Never returns.
+
+            Raises:
+            * `EOFError`: Always.
+            """
+            questions.append(question)
+            raise EOFError
+
+        output: io.StringIO = io.StringIO()
+        with (
+            contextlib.redirect_stdout(output),
+            contextlib.redirect_stderr(output),
+        ):
+            code = Items.run_command(["r", "cr", "1", *doubtful], ask)
+        text = output.getvalue()
+        check(
+            code == 0
+            and len(questions) == 1
+            and "'../shared/Gamma_Rule.md': imports @Alpha_Rule.md\n"
+            in questions[0]
+            and "'../shared/README.md': a project file name\n" in questions[0]
+            and "Beta" not in questions[0]
+            and "Skipped '../shared/Gamma_Rule.md', '../shared/README.md'"
+            in text
+            and sorted(path.name for path in rules.glob("[0-9]*"))
+            == ["1_Alpha_Rule", "2_Beta_Rule"],
+            "doubtful files are asked about once and left out",
+        )
+
+        # Answering no to only doubtful files creates nothing.
+        answers[:] = ["n"]
+        code, text = run("r", "cr", "3", "../shared/README.md")
+        check(
+            code == 1 and "No rules were created" in text,
+            "no rules are created from only doubtful files",
+        )
+
+        # Answering yes uses them.
+        answers[:] = ["yes"]
+        code, text = run("r", "cr", "3", "../shared/README.md")
+        check(
+            code == 0 and (rules / "3_README" / "README.md").is_file(),
+            "a doubtful file is used when the answer is yes",
+        )
+
+        # The `source` command checks the same way.
+        for answer, arguments, code, text in (
+            ("", ("r", "source", "1", "../shared/CLAUDE.md"), 1, "by itself"),
+            ("n", ("r", "source", "1", "../shared/Gamma_Rule.md"), 1, "No "),
+            ("", ("r", "source", "1", "../shared/No.md"), 1, "not a file"),
+            ("y", ("r", "source", "1", "../shared/Gamma_Rule.md"), 0, "R.ar"),
+        ):
+            answers[:] = [answer] if answer else []
+            result: tuple[int, str] = run(*arguments)
+            check(
+                result[0] == code and text in result[1],
+                f"doubtful source {' '.join(arguments)!r}",
+            )
+
+        # A source that can not be read is reported when it is copied.
+        if os.geteuid() != 0:
+            unreadable: Path = shared / "Delta_Rule.md"
+            write_file(unreadable, "# D\n")
+            unreadable.chmod(0o000)
+            code, text = run("r", "cr", "4", "../shared/Delta_Rule.md")
+            check(
+                code == 1 and "Unable to refresh R.dr" in text,
+                "a source that can not be read",
+            )
+    finally:
+        os.chdir(original)
+
+
+# Function `_shared_files()`:
+def _shared_files(shared: Path) -> list[str]:
+    """Return every Markdown file in a directory, as a shell glob would.
+
+    Arguments:
+    * `shared` (`Path`):
+      The directory, a sibling of the project.
+
+    Returns:
+    * (`list[str]`): The files, relative to the project, sorted.
+    """
+    return sorted(
+        f"../{shared.name}/{path.name}" for path in shared.glob("*.md")
     )
 
 

@@ -145,7 +145,9 @@ copies each rule into the project:
 
     ai_contexts RULES create
     ai_contexts r type rules
-    ai_contexts r create 1 ../claude_code_rules/*.md
+    ai_contexts r create 1 ../claude_code_rules/Version_Control_Rules.md \
+                           ../claude_code_rules/Python_Coding_Rules.md \
+                           ../claude_code_rules/Code_Marker_Rules.md
     ai_contexts r activate R.vcr
 
 `create PLACE FILE...` makes one rule from each file (or glob pattern), at
@@ -158,6 +160,15 @@ same name (e.g.
 kept relative to the directory that holds the collections, with its
 directories resolved to real ones; `ai_contexts r source R.vcr FILE`
 changes it.
+
+Some files are not meant to be rules, and a glob like `*.md` can pick
+them up.  `create` and `source` insist on a file whose name ends in
+`.md`, and refuse a `CLAUDE.md` (or
+`CLAUDE.local.md`) file, since Claude Code loads those by itself, and
+nothing is created.  A file named in capital letters (like `README.md`)
+is usually about the project, and a file with an `@` import of a file
+does not stand alone, so they are listed in one question; unless the
+answer is yes, they are skipped and the other files are used.
 
 A new rule is InActive; `activate` (which needs a copy) and `deactivate` change
 that.  Every time `ai_contexts` runs, it rewrites `RULES/Active_Rules.md` with

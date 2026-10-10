@@ -43,7 +43,11 @@ else in the current directory) and is named exactly as typed.
 Commands:
   create PLACE TITLE...   Create an item at PLACE (see below)
   create PLACE FILE...    In a rules collection, create a rule from each
-                          FILE (or glob pattern), at PLACE and after
+                          FILE (or glob pattern), at PLACE and after.
+                          Each FILE must end in .md, and a CLAUDE.md
+                          file is refused; asks before using
+                          a file that does not look like a rule (named
+                          like README.md, or with an @ import)
   move NUMBER PLACE       Move an item, with its children, to PLACE.
                           NUMBER may be a range of siblings, like 1.2.5-6
   transfer NUMBER COLLECTION [PLACE]
@@ -69,6 +73,7 @@ Commands:
   activate [-r] NUMBER    Set the rule state to Active (rules collections)
   deactivate [-r] NUMBER  Set the rule state to InActive (rules collections)
   source NUMBER FILE      Make FILE the source of a rule, and copy it
+                          (checked like create)
   refresh NUMBER          Copy a rule's source over its copy, asking first
                           if the copy was edited in place
   priority NUMBER LEVEL   Set the item priority: 0 (catastrophic), 1 (high),
@@ -268,10 +273,14 @@ and refreshed by `ai_contexts`; its states are Active and InActive
 Claude never edits a rule's copy: a change to a rule is made in its
 source (and only when asked), and the next `ai_contexts` run copies it.
 New rules come from files with `ai_contexts r create PLACE FILE...`,
-and `ai_contexts r source R.vcr FILE` changes a rule's source.  When
-`ai_contexts` reports a copy edited in place, a missing source, an `@`
-import in a rule or a rule that `CLAUDE.md` also imports, Claude tells
-the user rather than fixing it with `refresh`.
+and `ai_contexts r source R.vcr FILE` changes a rule's source.  Both
+insist on a file ending in `.md`, refuse a `CLAUDE.md` file, and ask
+before using a file that does not look like a rule (one named in
+capital letters, like `README.md`, or one with an `@` import); Claude
+answers no unless the user asked for that file.  When `ai_contexts`
+reports a copy edited in place, a missing source, an `@` import in a
+rule or a rule that `CLAUDE.md` also imports, Claude tells the user
+rather than fixing it with `refresh`.
 """
 
 STATES: tuple[str, ...] = (
@@ -405,6 +414,14 @@ COPY_TEMPORARY: str = ".copy.tmp"
 RESERVED_NAMES: frozenset[str] = frozenset(
     {"Details.md", "Context.md", "Summary.md"}
 )
+
+# The file names (in lower case) that Claude Code loads by itself, so
+# they can never be the source of a rule.
+CLAUDE_NAMES: frozenset[str] = frozenset({"claude.md", "claude.local.md"})
+
+# A file name stem in capital letters (e.g. `README`), which marks a
+# file about the project rather than a rule.
+CAPITALS_PATTERN: re.Pattern[str] = re.compile(r"[A-Z0-9_]*[A-Z][A-Z0-9_]*")
 
 # An `@` import in Markdown: an `@` that starts a word, and the path
 # after.
@@ -978,6 +995,135 @@ def expand_files(arguments: list[str]) -> list[Path] | str:
         if not path.is_file():
             return f"'{path}' is not a file"
     return files
+
+
+# Function `source_name_error()`:
+def source_name_error(path: Path) -> str:
+    """Return why a file can not be the source of a rule, if it can not.
+
+    A source must be a Markdown file (ending in `.md`), and can not be
+    hidden, have one of the `RESERVED_NAMES` (its copy goes into an
+    item directory) or be one of the `CLAUDE_NAMES` (Claude Code loads
+    it by itself).
+
+    Arguments:
+    * `path` (`Path`):
+      The source file.
+
+    Returns:
+    * (`str`): An error string, or an empty string if the name is
+      usable.
+    """
+    if path.name in RESERVED_NAMES or path.name.startswith("."):
+        return f"A source can not be named '{path.name}'"
+    if path.suffix != ".md" or path.stem == "":
+        return (
+            f"'{path}' can not be a rule, since its name does not end in .md"
+        )
+    if path.name.casefold() in CLAUDE_NAMES:
+        return (
+            f"'{path}' can not be a rule, since Claude Code loads "
+            f"{path.name} files by itself"
+        )
+    return ""
+
+
+# Function `source_doubts()`:
+def source_doubts(path: Path) -> str:
+    """Return why a file looks like it is not meant to be a rule.
+
+    A file named in capital letters (e.g. `README.md`) is usually about
+    the project, and a file with an `@` import of a file (relative to
+    its own directory) does not stand alone.
+
+    Arguments:
+    * `path` (`Path`):
+      The source file.
+
+    Returns:
+    * (`str`): The reasons, or an empty string if there are none.
+    """
+    # A name in capital letters is about the project.
+    reasons: list[str] = []
+    if CAPITALS_PATTERN.fullmatch(path.stem):
+        reasons.append("a project file name")
+
+    # An import of a file means the file does not stand alone; a file
+    # that can not be read is reported when it is copied.
+    try:
+        text: str = read_file(path)
+    except (OSError, ValueError):
+        text = ""
+    imports: list[str] = [
+        f"@{imported}"
+        for _, imported in markdown_imports(text)
+        if (path.parent / Path(imported).expanduser()).is_file()
+    ]
+    if imports:
+        reasons.append(f"imports {', '.join(imports)}")
+
+    # Return the reasons.
+    return "; ".join(reasons)
+
+
+# Function `screen_sources()`:
+def screen_sources(
+    paths: list[Path], ask: Callable[[str], str]
+) -> list[Path] | str:
+    """Return the files that may become rules, asking about doubtful ones.
+
+    A file that can not be a source (see `source_name_error()`) is an
+    error, so that nothing is created.  The files that look like they
+    are not meant to be rules (see `source_doubts()`) are listed in one
+    question, and are left out unless the user answers yes.
+
+    Arguments:
+    * `paths` (`list[Path]`):
+      The source files.
+    * `ask` (`Callable[[str], str]`):
+      Asks the user a question and returns the answer.
+
+    Returns:
+    * (`list[Path] | str`): The files to use, or an error string if
+      there are none.
+    """
+    # Refuse a file that can never be a source.
+    path: Path
+    for path in paths:
+        error: str = source_name_error(path)
+        if error:
+            return error
+
+    # Find the doubtful files.
+    doubts: dict[Path, str] = {}
+    for path in paths:
+        reasons: str = source_doubts(path)
+        if reasons:
+            doubts[path] = reasons
+    if not doubts:
+        return paths
+
+    # Ask once about all of them.
+    listed: str = "".join(
+        f"  '{path}': {reasons}\n" for path, reasons in doubts.items()
+    )
+    try:
+        answer: str = ask(
+            "These do not look like rules:\n"
+            f"{listed}Make rules from them anyway? [y/N] "
+        )
+    except EOFError:
+        answer = ""
+    if answer.strip().casefold() in ("y", "yes"):
+        return paths
+
+    # Leave them out.
+    kept: list[Path] = [path for path in paths if path not in doubts]
+    print(
+        f"Skipped {', '.join(repr(str(path)) for path in doubts)}",
+        file=sys.stderr,
+    )
+    return kept or "No rules were created"
 
 
 # Function `base_tag()`:
@@ -3358,15 +3504,14 @@ class Items:
         Returns:
         * (`Item | str`): The rule, or an error string on failure.
         """
-        # Select the rule; the file must be a file with a usable name.
+        # Select the rule; the file must be a file.  Its name was
+        # checked by `screen_sources()`.
         selected: list[Item] | str = self.select_items(name)
         if isinstance(selected, str):
             return selected
         item: Item = selected[0]
         if not path.is_file():
             return f"'{path}' is not a file"
-        if path.name in RESERVED_NAMES or path.name.startswith("."):
-            return f"A source can not be named '{path.name}'"
 
         # Keep the source relative to the root, with real directories.
         source: str = (
@@ -3397,12 +3542,19 @@ class Items:
         return item
 
     # Method `Items.source_command()`:
-    def source_command(self, arguments: list[str]) -> str:
+    def source_command(
+        self, arguments: list[str], ask: Callable[[str], str] = input
+    ) -> str:
         """Run `source NUMBER PATH`: set and copy the source of a rule.
+
+        A file that does not look like a rule is only used if the user
+        answers yes (see `screen_sources()`).
 
         Arguments:
         * `arguments` (`list[str]`):
           The command's arguments.
+        * `ask` (`Callable[[str], str]`):
+          Asks the user a question and returns the answer.
 
         Returns:
         * (`str`): An empty string on success, or an error string on
@@ -3413,7 +3565,14 @@ class Items:
         name: tuple[int, ...] | str = self.resolve(arguments[0])
         if isinstance(name, str):
             return name
-        changed: Item | str = self.set_source(name, Path(arguments[1]))
+        paths: list[Path] | str = (
+            screen_sources([Path(arguments[1])], ask)
+            if Path(arguments[1]).is_file()
+            else [Path(arguments[1])]
+        )
+        if isinstance(paths, str):
+            return paths
+        changed: Item | str = self.set_source(name, paths[0])
         if isinstance(changed, str):
             return changed
         self.show([changed])
@@ -3591,15 +3750,21 @@ class Items:
         return ""
 
     # Method `Items.create_command()`:
-    def create_command(self, arguments: list[str]) -> str:
+    def create_command(
+        self, arguments: list[str], ask: Callable[[str], str] = input
+    ) -> str:
         """Run `create [before|after] NUMBER TITLE...`.
 
         In a collection with sources it is `create [before|after] NUMBER
-        FILE...` (see `create_rules()`).
+        FILE...` (see `create_rules()`), and files that do not look like
+        rules are only used if the user answers yes (see
+        `screen_sources()`).
 
         Arguments:
         * `arguments` (`list[str]`):
           The command's arguments.
+        * `ask` (`Callable[[str], str]`):
+          Asks the user a question and returns the answer.
 
         Returns:
         * (`str`): An empty string on success, or an error string on
@@ -3619,6 +3784,9 @@ class Items:
         # A rules collection makes a rule from each file.
         if sources:
             paths: list[Path] | str = expand_files(arguments[1:])
+            if isinstance(paths, str):
+                return paths
+            paths = screen_sources(paths, ask)
             if isinstance(paths, str):
                 return paths
             return self.create_rules(place, arguments[0], paths)
@@ -4436,7 +4604,7 @@ class Items:
             case "help":
                 print(HELP)
             case "create":
-                error = items.create_command(rest)
+                error = items.create_command(rest, ask)
             case "list":
                 error = items.list_command(rest)
             case "rename":
@@ -4454,7 +4622,7 @@ class Items:
             case "type":
                 error = items.type_command(rest)
             case "source":
-                error = items.source_command(rest)
+                error = items.source_command(rest, ask)
             case "refresh":
                 error = items.refresh_command(rest, ask)
             case "enable" | "disable":

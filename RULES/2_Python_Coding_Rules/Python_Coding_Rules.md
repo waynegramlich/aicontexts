@@ -1,5 +1,13 @@
 # Python Coding Rules
 
+<!-- --------------------------- 79 characters ---------------------------- -->
+
+<!--
+These rules are based on `Misc_Files/python_with_markdown.md`, which has
+background and references.  Where the two differ, these rules take
+precedence.
+-->
+
 ## Type Hints and Tools
 
 * **ALL** Python variables should have a valid type hint.
@@ -24,6 +32,7 @@
 
 ## Comments and Formatting
 
+* Docstrings and comments are written in Markdown.
 * Write comments and docstrings as English sentences: first word
   capitalized, ending with a period (or question mark).  Partial
   sentences that end in a `:` are allowed as well.  No misspelled
@@ -33,27 +42,27 @@
   a line cannot reasonably be wrapped (e.g. long hyperlinks, code
   blocks).
 * Enclose variable, function, class, and method names in back quotes
-  inside comments (e.g. `my_func`, `my_class`, `my_variable`).
+  inside comments and docstrings (e.g. `my_func`, `my_class`,
+  `my_variable`).
 * Separate blocks of code with blank lines, and put a 1- or 2-line `#`
   comment at the front of each block.
 
 ## Test Suites
 
-A test suite file is defined as one of the following:
+A test suite file is a Python file (its name ends with `.py`) that
+meets at least one of the following:
 
-* It resides in a directory named `tests/`.
-* It matches either `test_*.py` or `*_test.py`.
+* Its parent directory is named `tests` (e.g. `tests/foo.py`, but
+  not `tests/unit/foo.py`).
+* Its name starts with `test_`.
+* Its name ends with `_test.py`.
 
-Test suite files are exempt from the rules in the `Python` section
-and every section after it.
-
-## Python
-
-These rules are based on `Misc_Files/python_with_markdown.md`, which has
-background and references.  Where the two differ, these rules take
-precedence.  Docstrings and comments are written in Markdown, following
-the Google Python Style Guide (Sections 3.7 and 3.8) with the tweaks
-below.
+Test suite files are exempt from the rules in the `Shebang Line`
+section and every section after it.  This is a deliberate fence: test
+suites are designed and written by AI, so only the sections above
+`Shebang Line` apply to them.  A new section placed after
+`Shebang Line` is intentionally exempt as well; a rule that test
+suites must follow goes above it.
 
 ## Shebang Line
 
@@ -93,13 +102,14 @@ Docstring sections, in order:
 
 * **One-line summary** of what the function/method does, then a blank
   line.
-* **`Arguments:`** (Google's `Args:` is also acceptable): one bullet per
-  argument as `` * `name` (`type`): `` followed by its description.
+* **`Arguments:`**: one bullet per argument as `` * `name` (`type`): ``
+  followed by its description.
 * **`Returns:`** / **`Yields:`**: the return or yield value(s), with the
   type in parentheses.
 * **`Raises:`**: one bullet per possible exception.
 
 ```python
+# Function `divide()`:
 def divide(dividend: int, divisor: int) -> int:
     """Divide two integers.
 
@@ -115,6 +125,7 @@ def divide(dividend: int, divisor: int) -> int:
     Raises:
     * `ZeroDivisionError`: If `divisor` is zero.
     """
+    return dividend // divisor
 ```
 
 ## Classes
@@ -162,7 +173,8 @@ def divide(dividend: int, divisor: int) -> int:
   Use `X | None = None` only when "absent" is a real, meaningful state.
 * Use `__post_init__()` to validate constructor arguments (with
   `assert` or by raising an exception) and to compute `init=False`
-  fields.  Give it a one-line docstring saying what it does.
+  fields.  Its docstring follows the Functions and Methods rules, with
+  an `Arguments:` section for any `InitVar` arguments.
 * A value needed only during initialization (e.g. a `tracing` string)
   should be an `InitVar[...]`; it is passed to `__post_init__()` as an
   argument instead of being stored as an attribute.
@@ -197,6 +209,7 @@ def divide(dividend: int, divisor: int) -> int:
 from dataclasses import InitVar, dataclass, field
 
 
+# Class `SampleClass`:
 @dataclass(slots=True)
 class SampleClass:
     """One-line summary goes here.
@@ -228,8 +241,17 @@ class SampleClass:
     cook_style: str = field(init=False, default="")
     served: bool = field(init=False, default=False)
 
+    # Method `SampleClass.__post_init__()`:
     def __post_init__(self, tracing: str) -> None:
-        """Validate the arguments and compute `total_size`."""
+        """Validate arguments; compute `egg_sizes` and `total_size`.
+
+        Arguments:
+        * `tracing` (`str`):
+          A tracing string used only during initialization.
+
+        Raises:
+        * `ValueError`: If `eggs` is negative.
+        """
         # Validate the arguments.
         if self.eggs < 0:
             raise ValueError(f"{self.eggs=} must not be negative")
