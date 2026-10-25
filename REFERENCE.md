@@ -151,11 +151,18 @@ project (even through a symbolic link) without approval, so `ai_contexts`
 copies each rule into the project:
 
     ai_contexts RULES create
-    ai_contexts r type rules
     ai_contexts r create 1 ../shared_rules/Version_Control_Rules.md \
                            ../shared_rules/Python_Coding_Rules.md \
                            ../shared_rules/Code_Marker_Rules.md
     ai_contexts r activate R.vcr
+
+A collection's type (`items`, the default, or `rules`) is kept in its
+`.ai_contexts.json`, and sets its states and commands.  A collection
+named `RULES` (in any case) is a rules collection from the start; any
+other is made one with `ai_contexts NAME type rules` while it has no
+items.  A command of the other type (e.g. `copy` in an items
+collection) is refused with a message saying so, and how to change the
+type.
 
 `create PLACE FILE...` makes one rule from each file (or glob pattern), at
 PLACE and then after it, titled from the file name
@@ -172,8 +179,28 @@ run moves it to the new layout.)  The source is kept relative to the
 directory that holds the collections, with its directories resolved to
 real ones; `ai_contexts r source R.vcr FILE` changes it.
 
+`copy DIRECTORY [CHOICES...]` copies rules from another project's rules
+collection, or from any directory of rule files.  It lists them by
+number and title: a collection's rules in number order (their
+`Details.md` files, which may be sources there and only there; the
+collection is only read, never loaded, so nothing in it changes), or a
+directory's `.md` files in name order.  Each title is the file's first
+line, if that is a `# ` heading, or else the rule's title in its
+`.item.json`, or else its name.  A rule that is already here (with the
+same source, or the same text) is marked `(have it)`, and is not copied
+again.  The CHOICES are numbers and `FROM-TO` ranges, separated by
+commas or spaces (e.g. `1,3-5` or `1 3-5`); they are asked for if they
+are not given, and an empty answer copies nothing.  The chosen rules
+are checked like `create`'s files, and created after the last rule,
+InActive, with their files as their sources (e.g.
+`../other_project/RULES/2_Python_Coding_Rules/Details.md`, which that
+project keeps up to date from its own source).  `copy` then prints the
+`activate` command that would use them all; the state commands take a
+range of siblings (e.g. `ai_contexts r activate 4-6`), like `move` and
+`delete`.
+
 Some files are not meant to be rules, and a glob like `*.md` can pick
-them up.  `create` and `source` insist on a file whose name ends in
+them up.  `create`, `copy` and `source` insist on a file whose name ends in
 `.md`, and refuse a `CLAUDE.md` (or
 `CLAUDE.local.md`) file, since Claude Code loads those by itself, and
 nothing is created.  A file named in capital letters (like `README.md`)

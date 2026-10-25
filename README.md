@@ -228,12 +228,38 @@ and `ai_contexts` keeps a read-only copy of it in the project, as the
 rule's `Details.md` (the AI may not import a file from outside the
 project without approval):
 
+The easiest way to get rules is to copy them from another project:
+
 ```
 aic RULES create
-aic r type rules
-aic r create 1 ../shared_rules/[A-Z]*_Rules.md
-aic r activate R.vcr
+aic r copy ../other_project/RULES
 ```
+
+A collection named `RULES` is a rules collection from the start.  (A
+rules collection with another name is made with `aic NAME create`, and
+then `aic n type rules` while it is still empty.)
+
+`aic r copy` lists the other project's rules by number and title, and
+asks which to copy:
+
+```
+Rules in ../other_project/RULES:
+1  Code Marker Rules
+2  Python Coding Rules
+3  Version Control Rules
+Copy which? (e.g. 1,3-5; empty for none) 2-3
+1  InActive   R.pcr  Python Coding Rules
+2  InActive   R.vcr  Version Control Rules
+To use them: ai_contexts RULES activate 1-2
+```
+
+The choices are numbers and ranges, separated by commas or spaces, and
+can also be given on the command line (`aic r copy ../other_project/RULES
+2-3`).  A rule you already have is marked `(have it)` and is not copied
+again.  The directory can also be any directory of rule files (e.g.
+`../shared_rules/`), and a single file becomes a rule with `aic r create
+1 ../shared_rules/Version_Control_Rules.md`.  Either way, the rule's file
+is its source, and `aic` keeps the copy up to date with it.
 
 `aic` refuses to make a rule from a `CLAUDE.md` file, and asks before
 using a file that looks like it is about the project (like `README.md`)

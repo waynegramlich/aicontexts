@@ -35,7 +35,8 @@ HELP: str = """Usage: ai_contexts COLLECTION COMMAND [ARGUMENTS...]
        ai_contexts TAG COMMAND [ARGUMENTS...]
                                Same as `ai_contexts COLLECTION COMMAND TAG ...`
                                for the collection of TAG (e.g. I.dbzib)
-       ai_contexts NAME create Create the collection directory NAME
+       ai_contexts NAME create Create the collection directory NAME (a rules
+                               collection if NAME is RULES, in any case)
        ai_contexts --test      Run the self tests in a temporary directory
        ai_contexts -h | --help Print this help message
        ai_contexts             List the collections, one line each
@@ -72,7 +73,9 @@ Commands:
                           except Closed ones (unless named, or -a)
   show NUMBER             Show everything about an item
   ls [-a] [-l] [NUMBER]   Same as list
-  pending [-r] NUMBER     Set the item state to Pending
+  pending [-r] NUMBER     Set the item state to Pending (for this and the
+                          other state commands, NUMBER may be a range of
+                          siblings, like 1.2.5-6)
   open [-r] NUMBER        Set the item state to Open
   reference [-r] NUMBER   Set the item state to Reference
   suspend [-r] NUMBER     Set the item state to Suspended
@@ -84,6 +87,13 @@ Commands:
                           (checked like create)
   refresh NUMBER          Copy a rule's source over its copy, asking first
                           if the copy was edited in place
+  copy DIRECTORY [CHOICES...]
+                          List the rules in DIRECTORY (another project's
+                          rules collection, or a directory of rule files)
+                          by number and title, and copy the chosen ones
+                          (e.g. 1,3-5 or 1 3-5; asked for if not given)
+                          after the last rule, InActive, with their files
+                          as their sources
   priority NUMBER LEVEL   Set the item priority: 0 (catastrophic), 1 (high),
                           2 (medium), 3 (low), or - for none
   enable FEATURE          Enable a collection feature (only: priority)
@@ -292,11 +302,15 @@ made and refreshed by `ai_contexts`; its states are Active and InActive
 Claude never edits a rule's copy: a change to a rule is made in its
 source (and only when asked), and the next `ai_contexts` run copies it.
 New rules come from files with `ai_contexts r create PLACE FILE...`,
-and `ai_contexts r source R.vcr FILE` changes a rule's source.  Both
-insist on a file ending in `.md`, refuse a `CLAUDE.md` file, and ask
-before using a file that does not look like a rule (one named in
-capital letters, like `README.md`, or one with an `@` import); Claude
-answers no unless the user asked for that file.  When `ai_contexts`
+or from another project's rules (or a directory of rule files) with
+`ai_contexts r copy DIRECTORY [CHOICES...]`, which lists them by number
+and title and copies the chosen ones (e.g. `1,3-5`); Claude gives the
+CHOICES on the command line, as the user asked.  `ai_contexts r source
+R.vcr FILE` changes a rule's source.  All three insist on a file ending
+in `.md`, refuse a `CLAUDE.md` file, and ask before using a file that
+does not look like a rule (one named in capital letters, like
+`README.md`, or one with an `@` import); Claude answers no unless the
+user asked for that file.  When `ai_contexts`
 reports a copy edited in place, a missing source, an `@` import in a
 rule or a rule that `CLAUDE.md` also imports, Claude tells the user
 rather than fixing it with `refresh`.
@@ -388,7 +402,7 @@ TYPES: dict[str, CollectionType] = {
         finished_states=(),
         context_states=(),
         state_commands={"activate": "Active", "deactivate": "InActive"},
-        commands=("source", "refresh"),
+        commands=("source", "refresh", "copy"),
         files=("Details.md",),
         in_startup=False,
         has_sources=True,
@@ -908,7 +922,7 @@ def collections_in(directory: Path) -> list[Path]:
                     found.add(child)
             except OSError:
                 continue
-    return sorted(found)
+    return sorted(found, key=Path.as_posix)
 
 
 # Function `find_collections()`:
@@ -1008,6 +1022,69 @@ def commands(name: str = "") -> dict[str, str]:
     return {**COMMANDS, **{command: command for command in type_commands}}
 
 
+# Function `other_type_error()`:
+def other_type_error(word: str, name: str, directory: Path | None) -> str:
+    """Return an error for a command of another type of collection.
+
+    Arguments:
+    * `word` (`str`):
+      The command, as typed (any unique prefix).
+    * `name` (`str`):
+      The collection's name, as it was matched.
+    * `directory` (`Path | None`):
+      The collection's directory, or None if there is no one
+      collection.
+
+    Returns:
+    * (`str`): The error, naming the type whose command it is and how to
+      change the collection's type, or "" if `word` is not a command of
+      exactly one other type.
+    """
+    # Find the one type, other than the collection's, with the command.
+    if directory is None:
+        return ""
+    current: str = type_name(directory)
+    found: list[tuple[str, str]] = sorted(
+        {
+            (kind, command)
+            for kind, collection_type in TYPES.items()
+            if kind != current
+            for command in matches(
+                word,
+                [*collection_type.state_commands, *collection_type.commands],
+            )
+            if command not in commands(current)
+        }
+    )
+    if len(found) != 1:
+        return ""
+
+    # Say whose command it is, and how to change the type.
+    other: str
+    command: str
+    other, command = found[0]
+    return (
+        f"'{command}' is a command of {other} collections, and "
+        f"{directory.name} is {article(current)} {current} "
+        f"collection; while it has no items, `ai_contexts {name} type "
+        f"{other}` makes it {article(other)} {other} collection"
+    )
+
+
+# Function `article()`:
+def article(word: str) -> str:
+    """Return "an" for a word starting with a vowel, or else "a".
+
+    Arguments:
+    * `word` (`str`):
+      The word.
+
+    Returns:
+    * (`str`): The indefinite article.
+    """
+    return "an" if word[:1].casefold() in "aeiou" else "a"
+
+
 # Function `sha256_of()`:
 def sha256_of(path: Path) -> str:
     """Return the SHA-256 of a file.
@@ -1100,6 +1177,141 @@ def expand_files(arguments: list[str]) -> list[Path] | str:
     return files
 
 
+# Function `is_rule_copy()`:
+def is_rule_copy(path: Path) -> bool:
+    """Return True if a file is a rule's `Details.md` in a rules collection.
+
+    Arguments:
+    * `path` (`Path`):
+      The file.
+
+    Returns:
+    * (`bool`): True if `path` is `Details.md` in an item directory of a
+      collection whose items are copies of sources.
+    """
+    collection: Path = path.parent.parent
+    return (
+        path.name == "Details.md"
+        and TYPES.get(type_name(collection), TYPES[DEFAULT_TYPE]).has_sources
+    )
+
+
+# Function `rule_title()`:
+def rule_title(path: Path, fallback: str) -> str:
+    """Return the title of a rule file, from its first line.
+
+    Arguments:
+    * `path` (`Path`):
+      The rule file.
+    * `fallback` (`str`):
+      The title to use when the first line is not a `# ` heading (or
+      the file can not be read).
+
+    Returns:
+    * (`str`): The title.
+    """
+    try:
+        heading: str = read_file(path).partition("\n")[0]
+    except (OSError, ValueError):
+        return fallback
+    title: str = heading[2:].strip() if heading.startswith("# ") else ""
+    return title or fallback
+
+
+# Function `offered_rules()`:
+def offered_rules(directory: Path) -> list[tuple[str, Path]]:
+    """Return the rules in a directory that `copy` can copy.
+
+    In a rules collection, they are the items' `Details.md` files, in
+    number order; the collection is only read, never loaded, so nothing
+    in it changes.  In any other directory, they are its `.md` files
+    that can be sources (see `source_name_error()`), in name order.
+    Each title is the file's first-line heading, or else (for an item)
+    the title in its `.item.json`, or else the name.
+
+    Arguments:
+    * `directory` (`Path`):
+      The directory.
+
+    Returns:
+    * (`list[tuple[str, Path]]`): The title and file of each rule.
+    """
+    # A plain directory offers its Markdown files.
+    offered: list[tuple[str, Path]] = []
+    if not TYPES.get(type_name(directory), TYPES[DEFAULT_TYPE]).has_sources:
+        path: Path
+        for path in sorted(directory.glob("*.md"), key=Path.as_posix):
+            if path.is_file() and not source_name_error(path):
+                offered.append(
+                    (rule_title(path, path.stem.replace("_", " ")), path)
+                )
+        return offered
+
+    # A rules collection offers its items' copies, in number order.
+    numbered: list[tuple[tuple[int, ...], Path]] = []
+    item_directory: Path
+    for item_directory in directory.iterdir():
+        name: tuple[int, ...] | str = parse_number(
+            item_directory.name.partition("_")[0]
+        )
+        details: Path = item_directory / "Details.md"
+        if not isinstance(name, str) and details.is_file():
+            numbered.append((name, item_directory))
+    for _, item_directory in sorted(numbered):
+        try:
+            title: object = read_item(item_directory).get("title")
+        except (OSError, ValueError):
+            title = None
+        fallback: str = (
+            str(title)
+            if isinstance(title, str) and title
+            else item_directory.name.partition("_")[2].replace("_", " ")
+        )
+        details = item_directory / "Details.md"
+        offered.append((rule_title(details, fallback), details))
+    return offered
+
+
+# Function `parse_choices()`:
+def parse_choices(text: str, count: int) -> list[int] | str:
+    """Return the numbers that a list of choices gives.
+
+    The choices are numbers and `FROM-TO` ranges, separated by commas
+    or spaces (e.g. "1,3-5" or "1 3-5"), each from 1 to `count`.
+
+    Arguments:
+    * `text` (`str`):
+      The choices.
+    * `count` (`int`):
+      How many things there are to choose from.
+
+    Returns:
+    * (`list[int] | str`): The numbers chosen, sorted and without
+      repeats (empty if `text` is), or an error string.
+    """
+    # Read each number or range, which must be in order and in range.
+    chosen: set[int] = set()
+    word: str
+    for word in re.split(r"[,\s]+", text.strip()):
+        if not word:
+            continue
+        first: str
+        dash: str
+        last: str
+        first, dash, last = word.partition("-")
+        if (
+            not first.isdecimal()
+            or (dash and not last.isdecimal())
+            or not 1 <= int(first) <= int(last if dash else first) <= count
+        ):
+            return (
+                f"Invalid choice '{word}': choose numbers from 1 to {count}, "
+                "or ranges like 2-4, separated by commas or spaces"
+            )
+        chosen.update(range(int(first), int(last if dash else first) + 1))
+    return sorted(chosen)
+
+
 # Function `source_name_error()`:
 def source_name_error(path: Path) -> str:
     """Return why a file can not be the source of a rule, if it can not.
@@ -1107,7 +1319,9 @@ def source_name_error(path: Path) -> str:
     A source must be a Markdown file (ending in `.md`), and can not be
     hidden, have one of the `RESERVED_NAMES` (its copy goes into an
     item directory) or be one of the `CLAUDE_NAMES` (Claude Code loads
-    it by itself).
+    it by itself).  The exception is a rule's `Details.md` in a rules
+    collection (see `is_rule_copy()`), so that rules can be copied from
+    another project.
 
     Arguments:
     * `path` (`Path`):
@@ -1117,7 +1331,9 @@ def source_name_error(path: Path) -> str:
     * (`str`): An error string, or an empty string if the name is
       usable.
     """
-    if path.name in RESERVED_NAMES or path.name.startswith("."):
+    if (
+        path.name in RESERVED_NAMES and not is_rule_copy(path)
+    ) or path.name.startswith("."):
         return f"A source can not be named '{path.name}'"
     if path.suffix != ".md" or path.stem == "":
         return (
@@ -1208,7 +1424,8 @@ def screen_sources(
 
     # Ask once about all of them.
     listed: str = "".join(
-        f"  '{path}': {reasons}\n" for path, reasons in doubts.items()
+        f"  '{path.as_posix()}': {reasons}\n"
+        for path, reasons in doubts.items()
     )
     try:
         answer: str = ask(
@@ -1223,7 +1440,7 @@ def screen_sources(
     # Leave them out.
     kept: list[Path] = [path for path in paths if path not in doubts]
     print(
-        f"Skipped {', '.join(repr(str(path)) for path in doubts)}",
+        f"Skipped {', '.join(repr(path.as_posix()) for path in doubts)}",
         file=sys.stderr,
     )
     return kept or "No rules were created"
@@ -1478,7 +1695,7 @@ def tag_references(root: Path, tag: str) -> list[Path]:
     # Search each writable Markdown file that is not a link.
     pattern: re.Pattern[str] = tag_pattern(tag)
     found: list[Path] = []
-    for path in sorted(paths):
+    for path in sorted(paths, key=Path.as_posix):
         if (
             path.is_file()
             and not path.is_symlink()
@@ -1576,8 +1793,8 @@ def clean_title(title: str) -> str:
 def parse_recursive(
     command: str,
     arguments: list[str],
-    resolve: Callable[[str], tuple[int, ...] | str] = parse_number,
-) -> tuple[tuple[int, ...], bool] | str:
+    resolve: Callable[[str], list[tuple[int, ...]] | str],
+) -> tuple[list[tuple[int, ...]], bool] | str:
     """Parse the `[-r] NUMBER` arguments of a command.
 
     Arguments:
@@ -1585,12 +1802,13 @@ def parse_recursive(
       The command, for the usage message.
     * `arguments` (`list[str]`):
       The command's arguments.
-    * `resolve` (`Callable[[str], tuple[int, ...] | str]`):
-      Converts a number or tag into an item name or an error string.
+    * `resolve` (`Callable[[str], list[tuple[int, ...]] | str]`):
+      Converts a number, tag or range into item names or an error
+      string.
 
     Returns:
-    * (`tuple[tuple[int, ...], bool] | str`): The item name and whether
-      `-r` was given, or an error string.
+    * (`tuple[list[tuple[int, ...]], bool] | str`): The item names and
+      whether `-r` was given, or an error string.
     """
     # Separate the `-r` option from the number.
     recursive: bool = False
@@ -1606,11 +1824,11 @@ def parse_recursive(
     if len(numbers) != 1:
         return f"Usage: ai_contexts COLLECTION {command} [-r] NUMBER"
 
-    # Resolve the number or tag.
-    name: tuple[int, ...] | str = resolve(numbers[0])
-    if isinstance(name, str):
-        return name
-    return name, recursive
+    # Resolve the number, tag or range.
+    names: list[tuple[int, ...]] | str = resolve(numbers[0])
+    if isinstance(names, str):
+        return names
+    return names, recursive
 
 
 # Class `Item`:
@@ -3837,12 +4055,19 @@ class Items:
         return ""
 
     # Method `Items.create_rules()`:
-    def create_rules(self, place: str, word: str, paths: list[Path]) -> str:
+    def create_rules(
+        self,
+        place: str,
+        word: str,
+        paths: list[Path],
+        titles: dict[Path, str] | None = None,
+    ) -> list[Item] | str:
         """Create a rule from each of some files, at a place.
 
         The first rule goes at `word` (see `plan_place()`), and each of
-        the others after the one before.  Each is titled from its file
-        name and has its source set.  The rules are printed.
+        the others after the one before.  Each is titled from `titles`,
+        or else from its file name, and has its source set.  The rules
+        are printed.
 
         Arguments:
         * `place` (`str`):
@@ -3851,16 +4076,20 @@ class Items:
           A number, or with `place`, a number or tag.
         * `paths` (`list[Path]`):
           The source files.
+        * `titles` (`dict[Path, str] | None`):
+          The title of each source file, if not its name.
 
         Returns:
-        * (`str`): An empty string on success, or an error string on
+        * (`list[Item] | str`): The new rules, or an error string on
           failure.
         """
         # Create each rule after the one before, and set its source.
         created: list[Item] = []
         path: Path
         for path in paths:
-            title: str = path.stem.replace("_", " ")
+            title: str = (titles or {}).get(path) or path.stem.replace(
+                "_", " "
+            )
             item: Item | str = (
                 self.create_item(created[-1].number, title, "after")
                 if created
@@ -3875,6 +4104,114 @@ class Items:
 
         # Print the new rules.
         self.show(created)
+        return created
+
+    # Method `Items.copy_command()`:
+    def copy_command(
+        self, arguments: list[str], ask: Callable[[str], str] = input
+    ) -> str:
+        """Run `copy DIRECTORY [CHOICES...]`: copy rules from elsewhere.
+
+        The rules in DIRECTORY (another project's rules collection, or a
+        directory of rule files; see `offered_rules()`) are listed by
+        number and title, marking those already here (the same source,
+        or the same text).  The CHOICES (see `parse_choices()`) are
+        asked for if not given.  The chosen rules, less those already
+        here, are screened (see `screen_sources()`) and created after
+        the last rule, InActive, with their files as their sources.
+
+        Arguments:
+        * `arguments` (`list[str]`):
+          The command's arguments.
+        * `ask` (`Callable[[str], str]`):
+          Asks the user a question and returns the answer.
+
+        Returns:
+        * (`str`): An empty string on success, or an error string on
+          failure.
+        """
+        # Find the rules offered by the directory.
+        if not arguments:
+            return "Usage: ai_contexts COLLECTION copy DIRECTORY [CHOICES...]"
+        directory: Path = Path(arguments[0])
+        if not directory.is_dir():
+            return f"'{directory}' is not a directory"
+        offered: list[tuple[str, Path]] = offered_rules(directory)
+        if not offered:
+            return f"'{directory}' has no rules to copy"
+
+        # Note the sources and texts of the rules already here.
+        sources: set[Path] = set()
+        hashes: set[str] = set()
+        item: Item
+        for item in self.list_items():
+            with contextlib.suppress(OSError):
+                if item.source:
+                    sources.add((self.root / item.source).resolve())
+                if self.copy_path(item).is_file():
+                    hashes.add(sha256_of(self.copy_path(item)))
+        have: list[bool] = []
+        title: str
+        path: Path
+        for title, path in offered:
+            try:
+                have.append(
+                    path.resolve() in sources or sha256_of(path) in hashes
+                )
+            except OSError:
+                have.append(False)
+
+        # List them, and get the choices.
+        width: int = len(str(len(offered)))
+        print(f"Rules in {directory.as_posix()}:")
+        number: int
+        for number, (title, path) in enumerate(offered, 1):
+            mark: str = "  (have it)" if have[number - 1] else ""
+            print(f"{number:>{width}}  {title}{mark}")
+        text: str = " ".join(arguments[1:])
+        if len(arguments) == 1:
+            try:
+                text = ask("Copy which? (e.g. 1,3-5; empty for none) ")
+            except EOFError:
+                text = ""
+        chosen: list[int] | str = parse_choices(text, len(offered))
+        if isinstance(chosen, str):
+            return chosen
+
+        # Leave out the rules already here.
+        for number in chosen:
+            if have[number - 1]:
+                print(f"Already have {number}  {offered[number - 1][0]}")
+        paths: list[Path] = [
+            offered[number - 1][1] for number in chosen if not have[number - 1]
+        ]
+        if not paths:
+            print("Nothing copied")
+            return ""
+
+        # Screen them, then create them after the last rule.
+        screened: list[Path] | str = screen_sources(paths, ask)
+        if isinstance(screened, str):
+            return screened
+        top: list[int] = [name[0] for name in self.items if len(name) == 1]
+        created: list[Item] | str = self.create_rules(
+            "",
+            str(max(top, default=0) + 1),
+            screened,
+            {path: title for title, path in offered},
+        )
+        if isinstance(created, str):
+            return created
+        # Say how to use them: they are siblings, so one range.
+        which: str = (
+            f"{self.prefix}{created[0].tag}"
+            if len(created) == 1
+            else f"{created[0].number}-{created[-1].number}"
+        )
+        print(
+            f"To use them: ai_contexts {self.items_directory.name} "
+            f"activate {which}"
+        )
         return ""
 
     # Method `Items.type_command()`:
@@ -3996,7 +4333,10 @@ class Items:
             paths = screen_sources(paths, ask)
             if isinstance(paths, str):
                 return paths
-            return self.create_rules(place, arguments[0], paths)
+            rules: list[Item] | str = self.create_rules(
+                place, arguments[0], paths
+            )
+            return rules if isinstance(rules, str) else ""
 
         # Otherwise make an item with the title.
         result: Item | str = self.create_item(
@@ -4376,6 +4716,8 @@ class Items:
     def state_command(self, command: str, arguments: list[str]) -> str:
         """Run a state command, like `open`, with `[-r] NUMBER`.
 
+        NUMBER may be a range of siblings, like 1.2.5-6.
+
         Arguments:
         * `command` (`str`):
           The state command.
@@ -4387,22 +4729,26 @@ class Items:
           failure.
         """
         # Parse the arguments.
-        parsed: tuple[tuple[int, ...], bool] | str = parse_recursive(
-            command, arguments, self.resolve
+        parsed: tuple[list[tuple[int, ...]], bool] | str = parse_recursive(
+            command, arguments, self.resolve_range
         )
         if isinstance(parsed, str):
             return parsed
-        name: tuple[int, ...]
+        names: list[tuple[int, ...]]
         recursive: bool
-        name, recursive = parsed
+        names, recursive = parsed
 
-        # Set the state and print the items.
-        changed: list[Item] | str = self.set_state(
-            name, STATE_COMMANDS[command], recursive
-        )
-        if isinstance(changed, str):
-            return changed
-        self.show(changed)
+        # Set the state of each item and print the items.
+        shown: list[Item] = []
+        name: tuple[int, ...]
+        for name in names:
+            changed: list[Item] | str = self.set_state(
+                name, STATE_COMMANDS[command], recursive
+            )
+            if isinstance(changed, str):
+                return changed
+            shown += changed
+        self.show(shown)
         return ""
 
     # Method `Items.rename_command()`:
@@ -4491,7 +4837,8 @@ class Items:
                 path
                 for old_tag in tags
                 for path in tag_references(root, old_tag)
-            }
+            },
+            key=Path.as_posix,
         )
         print(
             "Only the collections and the `.md` files directly in "
@@ -4652,11 +4999,21 @@ class Items:
             print("Not created", file=sys.stderr)
             return 1
 
-        # Create it.
+        # Create it; one named RULES (in any case) is a rules collection.
         created: Items = Items(path)
         if created.error:
             return 1
-        print(f"Created '{path}'")
+        error: str = ""
+        if name.casefold() == "rules":
+            error = created.save_settings(
+                {**created.settings, "type": "rules"}
+            )
+            if error:
+                print(error, file=sys.stderr)
+                return 1
+            print(f"Created '{path}', a rules collection")
+        else:
+            print(f"Created '{path}'")
 
         # Rewrite `Startup.md` to include it, and write the rules files.
         collections: list[Items] = [
@@ -4667,7 +5024,7 @@ class Items:
             for collection in [created, *collections]
             if not collection.error
         ]
-        error: str = write_startup(loaded) or write_rules_files(loaded)
+        error = write_startup(loaded) or write_rules_files(loaded)
         if error:
             print(error, file=sys.stderr)
             return 1
@@ -4797,7 +5154,13 @@ class Items:
         elif len(arguments) < 2:
             error = "Usage: ai_contexts COLLECTION COMMAND [ARGUMENTS...]"
         elif not matched:
-            error = (
+            error = other_type_error(
+                arguments[1],
+                found[0] if len(found) == 1 else "",
+                directories[names.index(found[0])]
+                if len(found) == 1
+                else None,
+            ) or (
                 f"Unknown command '{arguments[1]}'; the commands are: "
                 f"{', '.join(known)}"
             )
@@ -4856,6 +5219,8 @@ class Items:
                 error = items.source_command(rest, ask)
             case "refresh":
                 error = items.refresh_command(rest, ask)
+            case "copy":
+                error = items.copy_command(rest, ask)
             case "enable" | "disable":
                 error = items.feature_command(matched[0], rest)
             case state_command:

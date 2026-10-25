@@ -129,11 +129,15 @@ made and refreshed by `ai_contexts`; its states are Active and InActive
 Claude never edits a rule's copy: a change to a rule is made in its
 source (and only when asked), and the next `ai_contexts` run copies it.
 New rules come from files with `ai_contexts r create PLACE FILE...`,
-and `ai_contexts r source R.vcr FILE` changes a rule's source.  Both
-insist on a file ending in `.md`, refuse a `CLAUDE.md` file, and ask
-before using a file that does not look like a rule (one named in
-capital letters, like `README.md`, or one with an `@` import); Claude
-answers no unless the user asked for that file.  When `ai_contexts`
+or from another project's rules (or a directory of rule files) with
+`ai_contexts r copy DIRECTORY [CHOICES...]`, which lists them by number
+and title and copies the chosen ones (e.g. `1,3-5`); Claude gives the
+CHOICES on the command line, as the user asked.  `ai_contexts r source
+R.vcr FILE` changes a rule's source.  All three insist on a file ending
+in `.md`, refuse a `CLAUDE.md` file, and ask before using a file that
+does not look like a rule (one named in capital letters, like
+`README.md`, or one with an `@` import); Claude answers no unless the
+user asked for that file.  When `ai_contexts`
 reports a copy edited in place, a missing source, an `@` import in a
 rule or a rule that `CLAUDE.md` also imports, Claude tells the user
 rather than fixing it with `refresh`.

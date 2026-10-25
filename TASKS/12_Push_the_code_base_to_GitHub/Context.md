@@ -142,3 +142,30 @@
   GitHub_Workflow_Rules.md`; `solidcraft`: `ai_contexts` link fixed.
   Both moved to the new rules layout (not committed there).
 * Example rule directory in `README.md`, `REFERENCE.md` and `RULES_TEXT` is now `../shared_rules/` (was `../claude_code_rules/`, which the user will delete); closed items left as history.  `solidcraft` rules now come from `../aicontexts/rule_sources/`.
+* check.yml 40239306320 (ebf09b2): 16/21 (lint, Linux, macOS all
+  pass).  Windows: 530 checks, 2 failures: doubtful sources printed
+  with `\` (`screen_sources()`), and reference files sorted
+  case-insensitively by `WindowsPath`.  Fixed with `as_posix()` and
+  `key=Path.as_posix` (also in `tag_references()` and
+  `collections_in()`).
+
+## `aic r copy` (2026-10-25, the user's design)
+
+* `README.md`'s rules example no longer worked for another project's
+  rules (every copy is `Details.md`, a reserved name).  Added `copy
+  DIRECTORY [CHOICES...]`: lists a rules collection's rules (by number;
+  read, never loaded) or a directory's `.md` files, titled by the first
+  `# ` line (else `.item.json`, else the name), marks `(have it)` (same
+  source or same text), takes comma or space separated numbers and
+  `FROM-TO` ranges (asked if not given), screens them like `create`,
+  and creates them after the last rule, InActive.  `is_rule_copy()`
+  lets such a `Details.md` be a source.  State commands now take a
+  range of siblings (for the `activate` hint).  `_test_rule_copy()`;
+  597 checks, full coverage.  Docs: `-h`, `RULES_TEXT`, `README.md`,
+  `REFERENCE.md`.
+* The user's `aic r copy` in `../solidcraftcnc` failed: its `RULES/` had
+  no type, so `copy` was "Unknown".  Now `NAME create` makes a `RULES`
+  collection (any case) a rules collection, and a command of the other
+  type says so and how to change the type (`other_type_error()`).
+  `README.md` and `REFERENCE.md` drop the `r type rules` step.  601
+  checks.  Rehearsed the README steps in a scratch `solidcraftcnc`.

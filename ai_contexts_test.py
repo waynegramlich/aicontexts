@@ -43,16 +43,21 @@ from ai_contexts import (
     collections_in,
     find_collections,
     has_summary,
+    is_rule_copy,
     local_time,
     matches,
     new_metadata,
+    offered_rules,
+    parse_choices,
     parse_number,
     parse_priority,
     print_items,
     read_file,
     read_item,
     remove_file,
+    rule_title,
     sha256_of,
+    source_name_error,
     tag_prefix,
     tag_references,
     unique_tag,
@@ -120,6 +125,8 @@ def test() -> int:
         _test_types(check, Path(temporary))
     with tempfile.TemporaryDirectory() as temporary:
         _test_rule_moves(check, Path(temporary))
+    with tempfile.TemporaryDirectory() as temporary:
+        _test_rule_copy(check, Path(temporary))
     with tempfile.TemporaryDirectory() as temporary:
         _test_rules(check, Path(temporary))
     with tempfile.TemporaryDirectory() as temporary:
@@ -2206,8 +2213,10 @@ def _test_types(check: Check, directory: Path) -> None:
         text: str
         for answer, arguments, code, text in (
             ("y", ("TASKS", "create"), 0, "Created"),
-            ("y", ("RULES", "create"), 0, "Created"),
-            ("", ("r", "type"), 0, "RULES: items\n"),
+            ("", ("Zebra", "zz"), 1, "Unknown command 'zz'; the commands"),
+            ("y", ("RULES", "create"), 0, "RULES', a rules collection\n"),
+            ("", ("r", "type"), 0, "RULES: rules\n"),
+            ("", ("r", "type", "items"), 0, "RULES: items\n"),
             ("", ("r", "type", "x"), 1, "TYPE is one of: items, rules"),
             ("", ("r", "type", "r", "x"), 1, "Usage"),
             ("", ("r", "type", "r"), 0, "RULES: rules\n"),
@@ -2222,10 +2231,30 @@ def _test_types(check: Check, directory: Path) -> None:
             ("", ("r", "act", "1"), 0, "1  Active     R.vcr"),
             ("", ("R.vcr", "deact"), 0, "1  InActive   R.vcr"),
             ("", ("r", "a", "R.vcr"), 0, "Active"),
-            ("", ("r", "open", "1"), 1, "commands are: create, rename"),
-            ("", ("r", "open", "1"), 1, "activate, deactivate"),
+            (
+                "",
+                ("r", "open", "1"),
+                1,
+                (
+                    "'open' is a command of items collections, and RULES is "
+                    "a rules collection; while it has no items, `ai_contexts "
+                    "RULES type items` makes it an items collection"
+                ),
+            ),
+            ("", ("r", "zz", "1"), 1, "commands are: create, rename"),
+            ("", ("r", "zz", "1"), 1, "activate, deactivate"),
             ("", ("r", "d", "1"), 1, "deactivate, delete, disable"),
-            ("", ("t", "act", "1"), 1, "Unknown command 'act'"),
+            (
+                "",
+                ("t", "act", "1"),
+                1,
+                (
+                    "'activate' is a command of rules collections, and TASKS "
+                    "is an items collection; while it has no items, "
+                    "`ai_contexts TASKS type rules` makes it a rules "
+                    "collection"
+                ),
+            ),
             ("", ("t", "d", "1"), 1, "delete, disable\n"),
             ("", ("r", "type", "items"), 1, "only be changed while it has"),
             ("", ("r", "type"), 0, "RULES: rules\n"),
@@ -2247,6 +2276,21 @@ def _test_types(check: Check, directory: Path) -> None:
                 result[0] == code and text in result[1],
                 f"type command {' '.join(arguments)!r}",
             )
+
+        # Report a RULES collection whose type can not be saved.
+        elsewhere: Path = directory / "elsewhere"
+        (elsewhere / ".git").mkdir(parents=True)
+        os.chdir(elsewhere)
+        answers[:] = ["y"]
+        with mock.patch.object(
+            Items, "save_settings", return_value="Unable to write"
+        ):
+            code, text = run("RULES", "create")
+        os.chdir(directory)
+        check(
+            code == 1 and "Unable to write" in text,
+            "a RULES collection whose type can not be saved",
+        )
 
         # Check the files of a rule.
         rule: Path = directory / "RULES" / "1_Version_Rules"
@@ -2368,6 +2412,193 @@ def _test_types(check: Check, directory: Path) -> None:
             )
         finally:
             empty.chmod(0o600)
+    finally:
+        os.chdir(original)
+
+
+# Function `_test_rule_copy()`:
+def _test_rule_copy(check: Check, directory: Path) -> None:
+    """Test copying rules from another project and from a directory.
+
+    Arguments:
+    * `check` (`Check`):
+      Records a check: a condition that should be true and its
+      description.
+    * `directory` (`Path`):
+      The directory to test in.
+    """
+    # Choices are numbers and ranges, separated by commas or spaces.
+    check(
+        parse_choices("1,3-5", 5) == [1, 3, 4, 5]
+        and parse_choices(" 2  1 , 2 ", 5) == [1, 2]
+        and parse_choices("", 5) == [],
+        "choices are numbers and ranges",
+    )
+    word: str
+    for word in ("0", "6", "3-2", "x", "1-", "-2", "2-9"):
+        check(
+            parse_choices(word, 5)
+            == f"Invalid choice '{word}': choose numbers from 1 to 5, or "
+            "ranges like 2-4, separated by commas or spaces",
+            f"the choice {word!r} is invalid",
+        )
+
+    # Make another project with three rules, one whose source has no
+    # heading.
+    answers: list[str] = []
+    run: Callable[..., tuple[int, str]] = _runner(answers)
+    original: Path = Path.cwd()
+    other: Path = directory / "other"
+    (other / ".git").mkdir(parents=True)
+    sources: Path = directory / "sources"
+    sources.mkdir()
+    write_file(sources / "Alpha_Rules.md", "# Alpha Rules\n\nDo A.\n")
+    write_file(sources / "Beta_Rules.md", "# Beta Rules\n\nDo B.\n")
+    write_file(sources / "Delta_Rules.md", "Do D.\n")
+    try:
+        os.chdir(other)
+        answer: str
+        arguments: tuple[str, ...]
+        code: int
+        text: str
+        for answer, arguments in (
+            ("y", ("RULES", "create")),
+            ("", ("r", "type", "rules")),
+            ("", ("r", "create", "1", "../sources/Alpha_Rules.md")),
+            ("", ("r", "create", "2", "../sources/Beta_Rules.md")),
+            ("", ("r", "create", "3", "../sources/Delta_Rules.md")),
+        ):
+            answers[:] = [answer] if answer else []
+            code, text = run(*arguments)
+            check(code == 0, f"rule copy setup {' '.join(arguments)!r}")
+
+        # A rule's `Details.md` may be a source, but no other.
+        details: Path = other / "RULES" / "2_Beta_Rules" / "Details.md"
+        check(
+            is_rule_copy(details)
+            and source_name_error(details) == ""
+            and not is_rule_copy(sources / "Details.md")
+            and source_name_error(sources / "Details.md") != "",
+            "a rule's Details.md in a rules collection may be a source",
+        )
+
+        # Make this project, with a rules collection.
+        mine: Path = directory / "mine"
+        (mine / ".git").mkdir(parents=True)
+        os.chdir(mine)
+        answers[:] = ["y"]
+        run("RULES", "create")
+        run("r", "type", "rules")
+        rules: Path = mine / "RULES"
+
+        # Copy the first and third, answering the question.
+        answers[:] = ["1 3"]
+        code, text = run("r", "copy", "../other/RULES")
+        check(
+            code == 0
+            and "Rules in ../other/RULES:\n1  Alpha Rules\n2  Beta Rules\n"
+            "3  Delta Rules\n"
+            in text
+            and "1  InActive   R.ar  Alpha Rules" in text
+            and "2  InActive   R.dr  Delta Rules" in text
+            and "To use them: ai_contexts RULES activate 1-2" in text
+            and read_item(rules / "1_Alpha_Rules")["source"]
+            == "../other/RULES/1_Alpha_Rules/Details.md"
+            and read_file(rules / "1_Alpha_Rules" / "Details.md")
+            == "# Alpha Rules\n\nDo A.\n",
+            "copy the chosen rules, titled by their headings or items",
+        )
+
+        # Copy again, by the command line: the ones here are skipped.
+        code, text = run("r", "copy", "../other/RULES", "1,", "2")
+        check(
+            code == 0
+            and "1  Alpha Rules  (have it)\n2  Beta Rules\n" in text
+            and "Already have 1  Alpha Rules" in text
+            and "3  InActive   R.br  Beta Rules" in text
+            and "To use them: ai_contexts RULES activate R.br" in text,
+            "copy by the command line, skipping the rules already here",
+        )
+        code, text = run("r", "copy", "../other/RULES", "3")
+        check(
+            code == 0 and "Nothing copied" in text,
+            "copy nothing when every chosen rule is here",
+        )
+        answers[:] = []
+        code, text = run("r", "copy", "../other/RULES")
+        check(
+            code == 0 and "Nothing copied" in text,
+            "copy nothing when there is no answer",
+        )
+
+        # Activate a range of rules.
+        code, text = run("r", "activate", "1-2")
+        check(
+            code == 0
+            and read_file(rules / "Active_Rules.md")
+            == "@1_Alpha_Rules/Details.md\n@2_Delta_Rules/Details.md\n",
+            "activate a range of rules",
+        )
+
+        # Report bad uses.
+        (directory / "empty").mkdir()
+        for arguments, text in (
+            (("r", "copy"), "Usage: ai_contexts COLLECTION copy DIRECTORY"),
+            (("r", "copy", "../none"), "'../none' is not a directory"),
+            (("r", "copy", "../empty"), "'../empty' has no rules to copy"),
+            (("r", "copy", "../other/RULES", "4"), "Invalid choice '4'"),
+        ):
+            result: tuple[int, str] = run(*arguments)
+            check(
+                result[0] == 1 and text in result[1],
+                f"rules copy {' '.join(arguments)!r} is refused",
+            )
+
+        # A plain directory offers its Markdown files, but not a
+        # `CLAUDE.md`, and a doubtful one is asked about.
+        write_file(sources / "CLAUDE.md", "# Claude\n")
+        write_file(sources / "README.md", "# Read Me\n")
+        answers[:] = ["n"]
+        code, text = run("r", "copy", "../sources", "4")
+        check(
+            code == 1
+            and "Rules in ../sources:\n1  Alpha Rules  (have it)\n"
+            "2  Beta Rules  (have it)\n3  Delta Rules  (have it)\n"
+            "4  Read Me\n"
+            in text
+            and "Skipped '../sources/README.md'" in text
+            and "No rules were created" in text,
+            "a plain directory offers its Markdown files",
+        )
+
+        # A title falls back to the item's directory name, and to the
+        # given one for a file that can not be read.
+        broken: Path = other / "RULES" / "3_Delta_Rules"
+        write_file(broken / ITEM_FILE, "{")
+        check(
+            offered_rules(other / "RULES")[2][0] == "Delta Rules"
+            and rule_title(directory, "Fallback") == "Fallback",
+            "a title falls back to the directory name",
+        )
+
+        # An error making the rules is reported.
+        answers[:] = ["y"]
+        with mock.patch.object(
+            Items, "create_rules", return_value="Unable to create"
+        ):
+            code, text = run("r", "copy", "../sources", "4")
+        check(
+            code == 1 and "Unable to create" in text,
+            "an error making the copied rules is reported",
+        )
+
+        # Files that can not be read are taken not to be here.
+        with mock.patch("ai_contexts.sha256_of", side_effect=OSError):
+            code, text = run("r", "copy", "../sources", "")
+        check(
+            code == 0 and "(have it)" not in text,
+            "a rule that can not be read is not taken to be here",
+        )
     finally:
         os.chdir(original)
 
@@ -2660,7 +2891,12 @@ def _test_rules(check: Check, directory: Path) -> None:
                 0,
                 "1  Active     R.lr  Link Rule\n",
             ),
-            ("", ("t", "source", "1", "x"), 1, "Unknown command"),
+            (
+                "",
+                ("t", "source", "1", "x"),
+                1,
+                "'source' is a command of rules collections",
+            ),
         ):
             answers[:] = [answer] if answer else []
             result = run(*arguments)
