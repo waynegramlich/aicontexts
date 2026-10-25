@@ -16,8 +16,14 @@
 * `rule_sources/GitHub_Setup_Rules.md`: added the per-host protocol
   trap, the public author email, and split pushing into its own step.
 
+* Added `git_hooks/` (copied from `../ezpkg`, trailer `Assisted-by:
+  Claude Code:claude-opus-5-5`) and `git config core.hooksPath
+  git_hooks`; tested in a scratch repository (trailer added, an
+  empty message refused).
+* The user: no push until `ISSUES/` is empty (it is, as of
+  2026-10-25).
+
 ## Next
 
 * Push `main` (the user's go), verify with `git ls-remote`.
-* `git_hooks/` for the `Assisted-by:` trailer (`R.gsr`).
 * Then `R.gar`: `check.yml`, `release.yml`, PyPI.
