@@ -104,6 +104,11 @@ Claude does this with the human's agreement on each choice:
    ```
 5. Push the default branch, after asking (`Version_Control_Rules.md`):
    `git push -u github main`.  Until then `defaultBranchRef` is empty.
+   When the human will push, Claude sets the upstream instead (`git
+   branch --set-upstream-to` refuses until `github/main` exists): `git
+   config branch.main.remote github`, `git config branch.main.merge
+   refs/heads/main`, then checks with `git push --dry-run`.  A plain
+   `git push` then works.
 6. Verify: `gh repo view OWNER/REPO --json url,visibility,defaultBranchRef`
    and `git ls-remote github main` against `git rev-parse main`.
 

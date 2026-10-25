@@ -27,3 +27,11 @@
 
 * Push `main` (the user's go), verify with `git ls-remote`.
 * Then `R.gar`: `check.yml`, `release.yml`, PyPI.
+
+## Upstream (2026-10-25)
+
+* The user pushes with a plain `git push`: `branch.main.remote github`
+  and `branch.main.merge refs/heads/main` set by `git config`
+  (`--set-upstream-to` needs `github/main` to exist); `git push
+  --dry-run` showed `* [new branch] main -> main`.  Added to `R.gsr`
+  step 5.
