@@ -22,6 +22,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import string
 import sys
 import time
@@ -285,7 +286,7 @@ exist; Claude tells the user about it.
 
 `RULES/` is a rules collection (`ai_contexts r type` prints a
 collection's type).  Each rule's `Details.md` is a read-only copy of a
-source file elsewhere (e.g. `../claude_code_rules/Version_Control_Rules.md`),
+source file elsewhere (e.g. `../shared_rules/Version_Control_Rules.md`),
 made and refreshed by `ai_contexts`; its states are Active and InActive
 (`ai_contexts r activate R.vcr`, `ai_contexts r deactivate R.vcr`).
 Claude never edits a rule's copy: a change to a rule is made in its
@@ -619,7 +620,57 @@ def write_file(path: Path, text: str) -> None:
     Raises:
     * `OSError`: If the file can not be written.
     """
-    path.write_text(text, encoding="utf-8")
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
+# Function `make_writable()`:
+def make_writable(path: Path) -> None:
+    """Make a file writable by its owner, if it exists.
+
+    Windows can not replace or delete a read-only file (such as the copy
+    of a rule's source), so one is made writable first.
+
+    Arguments:
+    * `path` (`Path`):
+      The file.
+
+    Raises:
+    * `OSError`: If its mode can not be changed.
+    """
+    if path.is_file() and not path.is_symlink():
+        path.chmod(path.stat().st_mode | stat.S_IWUSR)
+
+
+# Function `remove_file()`:
+def remove_file(path: Path) -> None:
+    """Remove a file, even a read-only one, if it exists.
+
+    Arguments:
+    * `path` (`Path`):
+      The file.
+
+    Raises:
+    * `OSError`: If it can not be removed.
+    """
+    make_writable(path)
+    path.unlink(missing_ok=True)
+
+
+# Function `remove_tree()`:
+def remove_tree(directory: Path) -> None:
+    """Remove a directory and everything in it, even read-only files.
+
+    Arguments:
+    * `directory` (`Path`):
+      The directory.
+
+    Raises:
+    * `OSError`: If it can not be removed.
+    """
+    path: Path
+    for path in directory.rglob("*"):
+        make_writable(path)
+    shutil.rmtree(directory)
 
 
 # Function `new_metadata()`:
@@ -824,6 +875,42 @@ def matches(word: str, names: Iterable[str]) -> list[str]:
     return [name for name in names if name.casefold().startswith(folded)]
 
 
+# Function `collections_in()`:
+def collections_in(directory: Path) -> list[Path]:
+    """Return the collections directly in a directory.
+
+    A collection is a sub-directory (not a symbolic link) holding a
+    `.ai_contexts.json` (or an old `.tracker.json`) file.  An entry that
+    can not be checked is skipped: on macOS, `/` has entries (such as
+    `/.resolve`) that some Pythons can not even `stat`.
+
+    Arguments:
+    * `directory` (`Path`):
+      The directory to look in.
+
+    Returns:
+    * (`list[Path]`): The collections, sorted.
+    """
+    # List the directory, which may not be readable.
+    try:
+        children: list[Path] = list(directory.iterdir())
+    except OSError:
+        return []
+
+    # Keep each sub-directory that has a collection file.
+    found: set[Path] = set()
+    child: Path
+    for child in children:
+        file_name: str
+        for file_name in (COLLECTION_FILE, OLD_COLLECTION_FILE):
+            try:
+                if (child / file_name).is_file() and not child.is_symlink():
+                    found.add(child)
+            except OSError:
+                continue
+    return sorted(found)
+
+
 # Function `find_collections()`:
 def find_collections(start: Path) -> list[Path]:
     """Return the collection directories nearest to a directory.
@@ -848,14 +935,7 @@ def find_collections(start: Path) -> list[Path]:
     # Search `start` and then each of its parents for collections.
     directory: Path
     for directory in (start, *start.parents):
-        found: list[Path] = sorted(
-            {
-                marker.parent
-                for file_name in (COLLECTION_FILE, OLD_COLLECTION_FILE)
-                for marker in directory.glob(f"*/{file_name}")
-                if marker.is_file() and not marker.parent.is_symlink()
-            }
-        )
+        found: list[Path] = collections_in(directory)
 
         # Migrate any old `.tracker.json` files.
         path: Path
@@ -1901,7 +1981,7 @@ class Items:
             # remove it if a newer copy was already made there.
             if item.source and old_copy != details_path and old_copy.is_file():
                 if details_path.exists():
-                    old_copy.unlink()
+                    remove_file(old_copy)
                     print(
                         f"Removed the old copy '{old_copy}' of {tag}",
                         file=sys.stderr,
@@ -2585,9 +2665,10 @@ class Items:
 
             # Replace the copy via a read-only temporary file.
             temporary: Path = item_directory / COPY_TEMPORARY
-            temporary.unlink(missing_ok=True)
+            remove_file(temporary)
             temporary.write_bytes(source)
             temporary.chmod(0o444)
+            make_writable(copy_path)
             temporary.replace(copy_path)
 
             # Record the new hash and the time.
@@ -3235,7 +3316,7 @@ class Items:
         for item in doomed:
             item_directory: Path = self.directories[item.name]
             try:
-                shutil.rmtree(item_directory)
+                remove_tree(item_directory)
             except OSError as error:
                 return f"Unable to delete '{item_directory}': {error}"
             del self.items[item.name]
@@ -3650,7 +3731,7 @@ class Items:
         item_directory: Path = self.directories[name]
         try:
             if item.source:
-                self.copy_path(item).unlink(missing_ok=True)
+                remove_file(self.copy_path(item))
             item.updated = update_item(
                 item_directory,
                 fields={"source": source, "sha256": None, "refreshed": None},
@@ -4424,7 +4505,7 @@ class Items:
         print("The following `.md` files have tags that need to be renamed:")
         path: Path
         for path in paths:
-            print(f"  {path.relative_to(root)}")
+            print(f"  {path.relative_to(root).as_posix()}")
         try:
             answer: str = ask("OK to update them? (y=Yes, n=No) ")
         except EOFError:

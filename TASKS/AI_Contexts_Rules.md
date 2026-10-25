@@ -123,7 +123,7 @@ exist; Claude tells the user about it.
 
 `RULES/` is a rules collection (`ai_contexts r type` prints a
 collection's type).  Each rule's `Details.md` is a read-only copy of a
-source file elsewhere (e.g. `../claude_code_rules/Version_Control_Rules.md`),
+source file elsewhere (e.g. `../shared_rules/Version_Control_Rules.md`),
 made and refreshed by `ai_contexts`; its states are Active and InActive
 (`ai_contexts r activate R.vcr`, `ai_contexts r deactivate R.vcr`).
 Claude never edits a rule's copy: a change to a rule is made in its

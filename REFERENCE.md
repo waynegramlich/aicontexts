@@ -152,9 +152,9 @@ copies each rule into the project:
 
     ai_contexts RULES create
     ai_contexts r type rules
-    ai_contexts r create 1 ../claude_code_rules/Version_Control_Rules.md \
-                           ../claude_code_rules/Python_Coding_Rules.md \
-                           ../claude_code_rules/Code_Marker_Rules.md
+    ai_contexts r create 1 ../shared_rules/Version_Control_Rules.md \
+                           ../shared_rules/Python_Coding_Rules.md \
+                           ../shared_rules/Code_Marker_Rules.md
     ai_contexts r activate R.vcr
 
 `create PLACE FILE...` makes one rule from each file (or glob pattern), at
@@ -164,7 +164,7 @@ directory holds only a `Details.md` and the `.item.json`, like a Task or
 an Issue (which also have a `Context.md` and a `Summary.md`).  A rule's
 `Details.md` is a read-only copy of its source file (e.g.
 `RULES/1_Version_Control_Rules/Details.md` for
-`../claude_code_rules/Version_Control_Rules.md`), so it starts with the
+`../shared_rules/Version_Control_Rules.md`), so it starts with the
 source's own heading, which `ai_contexts` leaves alone; the rule's title
 is kept in `.item.json` instead.  (A rule made before this had a
 heading-only `Details.md` and a copy with the source's name; the next

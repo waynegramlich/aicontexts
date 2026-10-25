@@ -124,3 +124,21 @@
 * Still needed: the user's commit and OK to push; then `check.yml`
   `source` run (Windows will likely fail on read-only rule copies);
   PyPI pending publishers (web); the user's go for each upload.
+
+## First `check.yml` run (2026-10-25)
+
+* check.yml 40234244435 (`source`, dd80f49): lint passed; 13/20
+  stranger jobs.  Failed: macOS 3.11 (both; `Path.glob()` at `/` hit
+  `/.resolve`, `EINVAL`), Windows (all 5; read-only `Details.md` can not
+  be deleted; paths printed with `\`).
+* Fixed: `collections_in()` (an `iterdir()` loop that skips entries it
+  can not check) for `find_collections()`; `write_file()` writes `\n`;
+  `make_writable()`, `remove_file()`, `remove_tree()` for read-only rule
+  copies (refresh, `source`, `upgrade_rule()`, `delete`); `as_posix()`
+  for the paths `update_references()` prints; tests use `remove_file()`
+  and have `_test_portability()` (570 checks).  Needs the user's
+  commit and push for the next run.
+* `ezpkg`: rule 5 now `R.gwr` from `../aicontexts/rule_sources/
+  GitHub_Workflow_Rules.md`; `solidcraft`: `ai_contexts` link fixed.
+  Both moved to the new rules layout (not committed there).
+* Example rule directory in `README.md`, `REFERENCE.md` and `RULES_TEXT` is now `../shared_rules/` (was `../claude_code_rules/`, which the user will delete); closed items left as history.  `solidcraft` rules now come from `../aicontexts/rule_sources/`.

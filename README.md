@@ -231,7 +231,7 @@ project without approval):
 ```
 aic RULES create
 aic r type rules
-aic r create 1 ../claude_code_rules/[A-Z]*_Rules.md
+aic r create 1 ../shared_rules/[A-Z]*_Rules.md
 aic r activate R.vcr
 ```
 

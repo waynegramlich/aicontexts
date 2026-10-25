@@ -18,6 +18,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TypeAlias
+from unittest import mock
 
 from ai_contexts import (
     CLOSED_SUMMARIES,
@@ -39,6 +40,7 @@ from ai_contexts import (
     base_tag,
     clean_title,
     closed_time,
+    collections_in,
     find_collections,
     has_summary,
     local_time,
@@ -49,6 +51,7 @@ from ai_contexts import (
     print_items,
     read_file,
     read_item,
+    remove_file,
     sha256_of,
     tag_prefix,
     tag_references,
@@ -107,6 +110,7 @@ def test() -> int:
         _test_checks(check, root / "checks")
         _test_write_failures(check, root / "failures")
         _test_errors(check, root / "errors")
+        _test_portability(check, root / "portability")
 
     # The commands search upward for collections, so they are tested
     # away from the collections made by the other tests.
@@ -2279,7 +2283,7 @@ def _test_types(check: Check, directory: Path) -> None:
 
         # Replace a heading-only `Details.md` with the copy, rather
         # than taking it for an edited copy.
-        details.unlink()
+        remove_file(details)
         write_file(details, "# 1 Version Rules\n")
         code, text = run("r", "ls")
         check(
@@ -2709,7 +2713,7 @@ def _test_rules(check: Check, directory: Path) -> None:
         )
 
         # Check an Active rule without a copy.
-        (rules / "1_Link_Rule" / "Details.md").unlink()
+        remove_file(rules / "1_Link_Rule" / "Details.md")
         code, text = run("r", "ls")
         check(
             "R.lr: its source '../shared/Beta_Rule.md' is missing\n" in text
@@ -3506,6 +3510,65 @@ def _test_interrupted_transfer(  # pylint: disable=too-many-arguments
 
     # Check the number of steps.
     check(limit > 3, f"a transfer of {name} has several steps")
+
+
+# Function `_test_portability()`:
+def _test_portability(check: Check, directory: Path) -> None:
+    """Test what differs between systems.
+
+    Arguments:
+    * `check` (`Check`):
+      Records a check: a condition that should be true and its
+      description.
+    * `directory` (`Path`):
+      The directory to test in.
+    """
+    # Files are written with "\n" line endings on every system.
+    directory.mkdir()
+    path: Path = directory / "lines.md"
+    write_file(path, "a\nb\n")
+    check(path.read_bytes() == b"a\nb\n", "files are written with \\n")
+
+    # A read-only file is removed, and a missing one is ignored.
+    path.chmod(0o444)
+    remove_file(path)
+    remove_file(path)
+    check(not path.exists(), "a read-only file is removed")
+
+    # A collection entry that can not be checked is skipped (as `/` on
+    # macOS has), and so is a directory that can not be listed.
+    (directory / "A" / COLLECTION_FILE).parent.mkdir()
+    write_file(directory / "A" / COLLECTION_FILE, "{}\n")
+    (directory / "B").mkdir()
+    real_is_file: Callable[[Path], bool] = Path.is_file
+
+    def is_file(path: Path) -> bool:
+        """Fail for anything in `B`, like a file that can not be checked.
+
+        Arguments:
+        * `path` (`Path`):
+          The path to check.
+
+        Returns:
+        * (`bool`): True if `path` is a file.
+
+        Raises:
+        * `OSError`: For anything in `B`.
+        """
+        if path.parent.name == "B":
+            raise OSError(22, "Invalid argument")
+        return real_is_file(path)
+
+    with mock.patch.object(Path, "is_file", is_file):
+        found: list[Path] = collections_in(directory)
+    check(
+        found == [directory / "A"],
+        "a collection entry that can not be checked is skipped",
+    )
+    check(
+        collections_in(directory / "missing") == [],
+        "a directory that can not be listed has no collections",
+    )
 
 
 # Function `_test_errors()`:
