@@ -61,6 +61,12 @@ pypi.org.  `GitHub_Actions_Rules.md` builds on them.
 * `gh auth setup-git` makes `gh` the credential helper, so `git push`
   over HTTPS needs no ssh key and no stored password.  Prefer HTTPS
   remotes: an ssh key with a forgotten passphrase blocks every push.
+* `gh` keeps the protocol per host, which wins over the global one, so
+  set both: `gh config set git_protocol https` and `gh config set -h
+  github.com git_protocol https`.  `gh auth status` then says
+  "Git operations protocol: https".  `gh repo create --remote` uses it;
+  a remote made while it was still ssh is fixed with `git remote
+  set-url github https://github.com/OWNER/REPO.git`.
 * The token needs the `repo` and `workflow` scopes.  Without
   `workflow`, pushing a file under `.github/workflows/` is refused
   ("refusing to allow an OAuth App to create or update workflow ...
@@ -87,14 +93,18 @@ Claude does this with the human's agreement on each choice:
      pushed can be taken back.
    * Item collections (`TASKS/`, `ISSUES/`, `RULES/`) become public
      along with the code.
-4. Create it and push the default branch, naming the remote `github`
-   (the `remote.pushdefault` in the human's `~/.gitconfig`):
+   * Every commit's author name and email become public.
+4. Create it, naming the remote `github` (the `remote.pushdefault` in
+   the human's `~/.gitconfig`), with a one-line description:
 
    ```
-   gh repo create OWNER/REPO --public --source=. --remote=github
-   git push -u github main
+   gh repo create OWNER/REPO --public --source=. --remote=github \
+       --description "..."
+   git remote -v                       # https://, not git@
    ```
-5. Verify: `gh repo view OWNER/REPO --json url,visibility,defaultBranchRef`
+5. Push the default branch, after asking (`Version_Control_Rules.md`):
+   `git push -u github main`.  Until then `defaultBranchRef` is empty.
+6. Verify: `gh repo view OWNER/REPO --json url,visibility,defaultBranchRef`
    and `git ls-remote github main` against `git rev-parse main`.
 
 ## Disclosing AI Help in Commits

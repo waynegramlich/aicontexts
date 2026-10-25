@@ -1,0 +1,16 @@
+{
+  "state": "Open",
+  "created": "2026-10-25T18:02:18Z",
+  "updated": "2026-10-25T18:02:28Z",
+  "history": [
+    {
+      "state": "Pending",
+      "time": "2026-10-25T18:02:18Z"
+    },
+    {
+      "state": "Open",
+      "time": "2026-10-25T18:02:28Z"
+    }
+  ],
+  "tag": "pcbtg"
+}
