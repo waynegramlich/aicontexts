@@ -94,3 +94,33 @@
   were updated.
 * Emacs lock files (`.#*`): not in `.gitignore`; the user wants to be
   told when one turns up.
+
+## Packaging and workflows (2026-10-25)
+
+* The user: nothing goes to pypi.org or test.pypi.org until they say
+  so; do everything up to the GitHub/PyPI web pages.  `../ezpkg` and
+  `../solidcraft` use aicontexts and must keep working.
+* Scratch copies of both (collections, top `.md` files, rule sources)
+  convert cleanly with the new code; `Startup.md` unchanged.  Found:
+  `ezpkg`'s rule 5 source `../aicontexts/rule_sources/GitHub_Actions_
+  Rules.md` is gone (renamed); `solidcraft`'s `ai_contexts` link points
+  at `../ai_contexts/ai_contexts.py`, which no longer exists.
+* Added `__version__ = "0.1.0"`, `pyproject.toml` (setuptools,
+  `py-modules` `ai_contexts` and `ai_contexts_test`, commands
+  `ai_contexts` and `aic`, dynamic version), `LICENSE` (MIT-0, copied
+  from `ezpkg`; the user has not approved it yet), build output in
+  `.gitignore`/`.hgignore`, and `_permissions_ignored()` in the tests
+  (no `os.geteuid` on Windows).
+* `release_check.py source|testpypi VERSION|pypi VERSION`: new venv, new
+  HOME, installs the wheel, runs the installed `ai_contexts --test` and
+  an `aic` session.  Passes locally on 3.11-3.15 (uv Pythons).
+* `.github/workflows/check.yml` (lint for `source`; stranger matrix of
+  4 OS x 5 Pythons) and `release.yml` (build with `dev` version for
+  testpypi, `GITHUB_REF` tag check for pypi; publish; listed; check).
+  `actionlint` clean; build steps rehearsed locally.
+* GitHub settings by `gh api`, read back: environments `testpypi`
+  (branch `main`) and `pypi` (tag `v*`), reviewer waynegramlich;
+  ruleset 25837137 "release tags".
+* Still needed: the user's commit and OK to push; then `check.yml`
+  `source` run (Windows will likely fail on read-only rule copies);
+  PyPI pending publishers (web); the user's go for each upload.

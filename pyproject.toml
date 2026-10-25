@@ -1,0 +1,41 @@
+# The `aicontexts` package: the single module `ai_contexts.py`, with
+# its tests (so that an installed `ai_contexts --test` works), and the
+# `ai_contexts` and `aic` commands.  Nothing outside the standard
+# library is needed to run it.
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aicontexts"
+dynamic = ["version"]
+description = "Startup context for AI sessions: tasks, issues and rules that the AI loads"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT-0"
+license-files = ["LICENSE"]
+authors = [{ name = "Wayne C. Gramlich" }]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Software Development",
+]
+
+[project.scripts]
+ai_contexts = "ai_contexts:main"
+aic = "ai_contexts:main"
+
+[project.urls]
+Homepage = "https://github.com/waynegramlich/aicontexts"
+Issues = "https://github.com/waynegramlich/aicontexts/issues"
+
+[tool.setuptools]
+py-modules = ["ai_contexts", "ai_contexts_test"]
+
+[tool.setuptools.dynamic]
+version = { attr = "ai_contexts.__version__" }

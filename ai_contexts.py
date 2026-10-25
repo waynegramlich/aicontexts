@@ -462,6 +462,10 @@ COLLECTION_FILE: str = ".ai_contexts.json"
 # called `tracker`; it is renamed to `COLLECTION_FILE` when found.
 OLD_COLLECTION_FILE: str = ".tracker.json"
 
+# The version of ai_contexts itself (the format of its collections is
+# `FORMAT_VERSION`).
+__version__: str = "0.1.0"
+
 # The version of the format of the collections, kept in
 # `.ai_contexts.json`.
 FORMAT_VERSION: str = "0.1"

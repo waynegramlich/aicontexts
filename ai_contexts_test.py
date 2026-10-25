@@ -769,8 +769,8 @@ def _test_rename_delete(check: Check, directory: Path) -> None:
     )
 
     # The remaining checks need permissions.
-    if os.geteuid() == 0:
-        # Permissions are not enforced for root.
+    if _permissions_ignored():
+        # Permissions are not enforced for root or on Windows.
         return  # pragma: no cover
 
     # Check failing to delete.
@@ -904,8 +904,8 @@ def _test_numbering(check: Check, directory: Path) -> None:
     )
 
     # The remaining checks need permissions.
-    if os.geteuid() == 0:
-        # Permissions are not enforced for root.
+    if _permissions_ignored():
+        # Permissions are not enforced for root or on Windows.
         return  # pragma: no cover
 
     # Report a failure to fix a gap.
@@ -1229,8 +1229,8 @@ def _test_references(check: Check, directory: Path) -> None:
     )
 
     # The remaining checks need permissions.
-    if os.geteuid() == 0:
-        # Permissions are not enforced for root.
+    if _permissions_ignored():
+        # Permissions are not enforced for root or on Windows.
         return  # pragma: no cover
 
     # Check that read-only files are not references.
@@ -1429,8 +1429,8 @@ def _test_closed(check: Check, directory: Path) -> None:
     )
 
     # The remaining checks need permissions.
-    if os.geteuid() == 0:
-        # Permissions are not enforced for root.
+    if _permissions_ignored():
+        # Permissions are not enforced for root or on Windows.
         return  # pragma: no cover
 
     # Report a `Summary.md` that can not be added.
@@ -1535,8 +1535,8 @@ def _test_checks(check: Check, directory: Path) -> None:
     )
 
     # The remaining checks need permissions.
-    if os.geteuid() == 0:
-        # Permissions are not enforced for root.
+    if _permissions_ignored():
+        # Permissions are not enforced for root or on Windows.
         return  # pragma: no cover
 
     # Report a check that fails.
@@ -1561,8 +1561,8 @@ def _test_write_failures(check: Check, directory: Path) -> None:
       The directory to test in.
     """
     # These checks need permissions.
-    if os.geteuid() == 0:
-        # Permissions are not enforced for root.
+    if _permissions_ignored():
+        # Permissions are not enforced for root or on Windows.
         return  # pragma: no cover
 
     # Make the test directory.
@@ -2062,8 +2062,8 @@ def _test_commands(check: Check, directory: Path) -> None:
         write_file(startup, saved)
 
         # The remaining checks need permissions.
-        if os.geteuid() == 0:
-            # Permissions are not enforced for root.
+        if _permissions_ignored():
+            # Permissions are not enforced for root or on Windows.
             return  # pragma: no cover
 
         # Check a command in a read-only collection.
@@ -2105,6 +2105,19 @@ def _test_commands(check: Check, directory: Path) -> None:
             directory.chmod(0o700)
     finally:
         os.chdir(original)
+
+
+# Function `_permissions_ignored()`:
+def _permissions_ignored() -> bool:
+    """Return True if file permissions are not enforced.
+
+    They are not for root, and Windows has only a read-only flag, so
+    the checks that need them are skipped.
+
+    Returns:
+    * (`bool`): True on Windows or for root.
+    """
+    return os.name == "nt" or os.geteuid() == 0
 
 
 # Function `_runner()`:
@@ -2323,8 +2336,8 @@ def _test_types(check: Check, directory: Path) -> None:
         write_file(settings_path, settings)
 
         # The remaining checks need permissions.
-        if os.geteuid() == 0:
-            # Permissions are not enforced for root.
+        if _permissions_ignored():
+            # Permissions are not enforced for root or on Windows.
             return  # pragma: no cover
 
         # Report settings that can not be read.
@@ -2770,8 +2783,8 @@ def _test_rule_failures(
     active.rmdir()
 
     # The remaining checks need permissions.
-    if os.geteuid() == 0:
-        # Permissions are not enforced for root.
+    if _permissions_ignored():
+        # Permissions are not enforced for root or on Windows.
         return  # pragma: no cover
 
     # Check a copy that can not be read.
@@ -2978,7 +2991,7 @@ def _test_rule_doubts(check: Check, directory: Path) -> None:
             )
 
         # A source that can not be read is reported when it is copied.
-        if os.geteuid() != 0:
+        if not _permissions_ignored():
             unreadable: Path = shared / "Delta_Rule.md"
             write_file(unreadable, "# D\n")
             unreadable.chmod(0o000)
@@ -3218,8 +3231,8 @@ def _test_transfer_failures(
     marker.unlink()
 
     # The remaining checks need permissions.
-    if os.geteuid() == 0:
-        # Permissions are not enforced for root.
+    if _permissions_ignored():
+        # Permissions are not enforced for root or on Windows.
         return  # pragma: no cover
 
     # Interrupt transfers by making a file read-only, and check that the
@@ -3386,8 +3399,8 @@ def _test_transfer_recovery(check: Check, directory: Path) -> None:
         )
 
     # The remaining checks need permissions.
-    if os.geteuid() == 0:
-        # Permissions are not enforced for root.
+    if _permissions_ignored():
+        # Permissions are not enforced for root or on Windows.
         return  # pragma: no cover
 
     # Load a collection whose parent can not be listed.
@@ -3558,8 +3571,8 @@ def _test_errors(check: Check, directory: Path) -> None:
             )
 
     # The remaining checks need permissions.
-    if os.geteuid() == 0:
-        # Permissions are not enforced for root.
+    if _permissions_ignored():
+        # Permissions are not enforced for root or on Windows.
         return  # pragma: no cover
 
     # Check a read-only collection.
@@ -3649,7 +3662,7 @@ def _test_old_collection_file(check: Check, directory: Path) -> None:
     )
 
     # The remaining checks need permissions.
-    if os.geteuid() == 0:
+    if _permissions_ignored():
         return  # pragma: no cover
 
     # Report an old file that can not be renamed.

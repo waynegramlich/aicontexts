@@ -255,15 +255,27 @@ Python 3.11 or later and nothing beyond the standard library.  Nothing
 else needs to be installed: the rules it gives the AI are built in.  To install
 it:
 
-1. Copy `ai_contexts.py` into a directory on your `PATH`, and make a
-   symbolic link to it named `aic`:
+1. Install the `aicontexts` package from PyPI, which gives you both the
+   `ai_contexts` and `aic` commands.  With `uv` or `pipx`, it gets an
+   environment of its own:
+
+   ```
+   uv tool install aicontexts
+   pipx install aicontexts
+   ```
+
+   Or, without either, copy `ai_contexts.py` into a directory on your
+   `PATH`, and make a symbolic link to it named `aic`:
 
    ```
    cp ai_contexts.py ~/bin/
    ln -s ai_contexts.py ~/bin/aic
    ```
 
-2. Create the collections and set up `CLAUDE.md` as described in
+2. Check it with `aic --test`, which runs its tests in a temporary
+   directory.
+
+3. Create the collections and set up `CLAUDE.md` as described in
    "Getting Started".
 
 `REFERENCE.md` has the details of how `ai_contexts` works.

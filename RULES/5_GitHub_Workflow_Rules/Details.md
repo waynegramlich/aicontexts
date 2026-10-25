@@ -70,6 +70,24 @@ macOS):
   true` for dot-directories.
 * Pin lint tools to the versions used locally (`ruff==X`, `mypy==Y`),
   so a new upstream rule cannot fail a run.
+* Give the testing workflow a `source` target (the default) that
+  builds a wheel from the chosen commit and tests it as a stranger
+  would, and runs the linters, so the workflow is useful before
+  anything is published (`aicontexts`: `check.yml` with
+  `release_check.py source`).
+* Pass an optional input as an optional argument with
+  `${VERSION:+"$VERSION"}`: nothing when it is empty, and quoted when
+  it is not.
+* Before committing a workflow, check it locally:
+  * `uvx --from actionlint-py actionlint .github/workflows/*.yml`
+    checks the syntax, the expressions and (with `shellcheck`) the
+    scripts.
+  * Rehearse a `run:` script by extracting it with `yaml.safe_load`
+    (`uvx --with pyyaml python`) and running it with `bash -e`, as the
+    runner does.  Runners have `python`; a machine with only `python3`
+    needs a scratch `python` link on `PATH`.
+  * Run the stranger check on every supported Python with
+    `uv run --no-project --python 3.X python release_check.py source`.
 
 ## Running and Watching
 
@@ -128,7 +146,12 @@ token, so no secret is ever stored.
      built, so every upload is tested as a stranger gets it.
 * Versions: `testpypi` uploads a disposable `X.Y.Z.devYYYYMMDDHHMM`
   (UTC), new on every run; `pypi` uploads `X.Y.Z` and the build refuses
-  unless `git tag --points-at HEAD` includes `vX.Y.Z`.
+  unless `git tag --points-at HEAD` includes `vX.Y.Z` (or, simpler, if
+  `GITHUB_REF` is not `refs/tags/vX.Y.Z`).
+* For a package built by `setuptools` with `dynamic = ["version"]` from
+  a module's `__version__` (`aicontexts`), the build job rewrites that
+  one line to the `dev` version before `python -m build`; the change
+  lives only on the runner.
 
 ### One-Time Setup, by `gh api`
 

@@ -6,3 +6,8 @@
 
 # Python byte code.
 __pycache__/
+
+# Python packaging output.
+*.egg-info/
+build/
+dist/

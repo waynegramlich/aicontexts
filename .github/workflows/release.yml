@@ -1,0 +1,149 @@
+# Publish `aicontexts` with Trusted Publishing (OIDC); no API token
+# exists.
+#
+# Started by hand, from the Actions tab or with
+#     gh workflow run release.yml -f target=testpypi
+# `testpypi` uploads a disposable `X.Y.Z.devYYYYMMDDHHMM` version of
+# whatever commit is chosen; `pypi` uploads `ai_contexts.__version__`,
+# and only from its `vX.Y.Z` tag.  Each target has a GitHub environment
+# of the same name, whose required reviewer (Wayne) approves the upload;
+# `pypi`'s admits only `v*` tags.  After the upload, `check.yml` checks
+# the version just published as a new user on every system.  See `R.gwr`
+# (GitHub Workflow Rules).
+
+name: release
+run-name: release ${{ inputs.target }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Where to publish
+        required: true
+        type: choice
+        options:
+          - testpypi
+          - pypi
+
+# Nothing but the publish job gets more than reading the repository.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.built.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      # Pinned to the versions used locally, so that a new lint rule can
+      # not fail a release.
+      - run: >-
+          python -m pip install
+          ruff==0.17.2 flake8==7.4.1 mypy==2.4.0 pylint==4.1.3 build twine
+      - run: ruff check ai_contexts.py ai_contexts_test.py release_check.py
+      - run: flake8 ai_contexts.py ai_contexts_test.py release_check.py
+      - run: >-
+          mypy --strict ai_contexts.py ai_contexts_test.py release_check.py
+      - run: pylint ai_contexts.py ai_contexts_test.py release_check.py
+      - run: python ai_contexts_test.py
+      # `testpypi` gets a new `dev` version on every run; `pypi` gets the
+      # source's version, and only from its tag.
+      - name: Set the version
+        shell: bash
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          base="$(python -c 'import ai_contexts; print(ai_contexts.__version__)')"
+          if [ "$TARGET" = testpypi ]; then
+            version="$base.dev$(date -u +%Y%m%d%H%M)"
+            python - "$version" <<'EOF'
+          import pathlib, re, sys
+          path = pathlib.Path("ai_contexts.py")
+          text, count = re.subn(
+              r'^__version__: str = "[^"]*"$',
+              f'__version__: str = "{sys.argv[1]}"',
+              path.read_text(encoding="utf-8"),
+              count=1,
+              flags=re.MULTILINE,
+          )
+          assert count == 1, "no __version__ line"
+          path.write_text(text, encoding="utf-8")
+          EOF
+          elif [ "$GITHUB_REF" != "refs/tags/v$base" ]; then
+            echo "A pypi release of $base must run from the tag v$base, not $GITHUB_REF"
+            exit 1
+          fi
+      # `dist/` must hold nothing but this build: all of it is uploaded.
+      - run: python -m build --outdir dist
+      - run: twine check --strict dist/*
+      # The version is the wheel's, `aicontexts-VERSION-py3-none-any.whl`.
+      - id: built
+        shell: bash
+        run: |
+          wheel="$(basename dist/aicontexts-*.whl)"
+          version="${wheel#aicontexts-}"
+          echo "version=${version%%-*}" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: ${{ inputs.target }}
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: >-
+            ${{ inputs.target == 'testpypi'
+                && 'https://test.pypi.org/legacy/'
+                || 'https://upload.pypi.org/legacy/' }}
+
+  # pypi.org can take a minute or more to list a new upload, so the
+  # check waits until the version's own page answers.  test.pypi.org
+  # needs no wait: `release_check.py` retries it itself.
+  listed:
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - shell: bash
+        env:
+          TARGET: ${{ inputs.target }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          if [ "$TARGET" != pypi ]; then exit 0; fi
+          for _ in $(seq 1 30); do
+            if curl -fsS -o /dev/null "https://pypi.org/pypi/aicontexts/$VERSION/json"; then
+              exit 0
+            fi
+            echo "pypi.org does not list aicontexts $VERSION yet; asking again in 10 s"
+            sleep 10
+          done
+          echo "pypi.org never listed aicontexts $VERSION"
+          exit 1
+
+  # The version just published, as a new user gets it.
+  check:
+    needs: [build, publish, listed]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/check.yml
+    with:
+      target: ${{ inputs.target }}
+      version: ${{ needs.build.outputs.version }}
