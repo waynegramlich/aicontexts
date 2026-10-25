@@ -1,0 +1,20 @@
+{
+  "state": "Active",
+  "created": "2026-10-25T17:18:32Z",
+  "updated": "2026-10-25T20:35:37Z",
+  "history": [
+    {
+      "state": "InActive",
+      "time": "2026-10-25T17:18:32Z"
+    },
+    {
+      "state": "Active",
+      "time": "2026-10-25T17:18:38Z"
+    }
+  ],
+  "tag": "gwr",
+  "source": "rule_sources/GitHub_Workflow_Rules.md",
+  "title": "GitHub Workflow Rules",
+  "sha256": "cd687372d87211b00fa221042f1a9e9ef6e9a3a43544c88eab1efad4e6d5a4ae",
+  "refreshed": "2026-10-25T20:35:37Z"
+}

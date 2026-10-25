@@ -224,8 +224,9 @@ issues by priority first.
 A rules collection (e.g. `RULES/`) holds rules that the AI should load at
 the start of every session, such as version control or coding rules
 shared by several projects.  Each rule is a file that can live anywhere,
-and `ai_contexts` keeps a read-only copy of it in the project (the AI may
-not import a file from outside the project without approval):
+and `ai_contexts` keeps a read-only copy of it in the project, as the
+rule's `Details.md` (the AI may not import a file from outside the
+project without approval):
 
 ```
 aic RULES create

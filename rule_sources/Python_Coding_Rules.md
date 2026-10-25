@@ -8,11 +8,50 @@ background and references.  Where the two differ, these rules take
 precedence.
 -->
 
-## Type Hints and Tools
+## Checkers
+
+* After every code change, rerun all of the checkers on the files that
+  changed, and fix (or report to the user) everything they find before
+  calling the change done:
+  * `ruff check` (`ruff check --fix` fixes simple errors) and
+    `ruff format --line-length 79`, which formats the code.
+  * `flake8`, with `max-line-length = 79` in the project's `.flake8`.
+    `ruff format` puts spaces around a `:` in a complex slice (which
+    PEP 8 allows), so `.flake8` also has `extend-ignore = E203`.
+  * `mypy --strict` (or at least `mypy --disallow-untyped-defs`), since
+    plain `mypy` skips functions with no type hints.
+  * `pylint`, which finds things that the others do not (e.g. unused
+    arguments, and functions that have grown too big).
+* Fix what the checkers find where that is reasonable (e.g. an unused
+  argument gets a name starting with `_`; a function with many
+  arguments takes some keyword-only).  A message that is deliberate is
+  quieted by a comment that names it (never a bare one that quiets
+  everything), next to a comment (or docstring sentence) saying why:
+  * `ruff` and `flake8`: `# noqa: CODE` at the end of the line (e.g.
+    `# noqa: E501`); both read the same comment.  A code that does not
+    suit the project is ignored in its `ruff.toml` or `.flake8`, with a
+    comment, and only with the user's agreement.
+  * `mypy`: `# type: ignore[CODE]` at the end of the line (e.g.
+    `# type: ignore[arg-type]`).
+  * `pylint`, for one line: `# pylint: disable=NAME` at the end of the
+    line (for a function's messages, its `def` line), or
+    `# pylint: disable-next=NAME` on the line before, when the line
+    would be too long.
+  * `pylint`, for a whole module (e.g. its size limits, like
+    `too-many-locals`, which type hints on every variable inflate): a
+    `# pylint: disable=NAME,...` line after the module docstring,
+    before the imports.
+* Use current versions of the checkers; distribution packages can be
+  far behind (Ubuntu 24.04 has `pylint` 3.0.3 and `mypy` 1.9).
+  `uv tool install ruff flake8 mypy pylint` installs them for the user,
+  in `~/.local/bin`, which must come before `/usr/bin` in `PATH`.
+* No checker is run on the PEP 8 72 character limit for docstring and
+  comment lines (`ruff` rule `W505` could, but it is not used).  Claude
+  is responsible for keeping those lines to 72 characters or fewer.
+
+## Type Hints
 
 * **ALL** Python variables should have a valid type hint.
-* Run `mypy --strict` (or at least `mypy --disallow-untyped-defs`), since
-  plain `mypy` skips functions with no type hints.
 * Use `Any` only as a last resort.
 * Quoted type hints (e.g. `"MyClass"`) are forward references for types
   not yet defined; `from __future__ import annotations` avoids the quotes.
@@ -24,11 +63,6 @@ precedence.
 * Use `NewType` only to create a distinct type (e.g.
   `UserId = NewType("UserId", int)`) that `mypy` keeps separate from its
   base type.
-* Run `ruff check` (or `ruff check --fix` to fix simple errors).
-* Run `ruff format --line-length 79` to format code consistently.
-* No tool is run to check the PEP 8 72 character limit on docstring and
-  comment lines (`ruff` rule `W505` could, but it is not used).  Claude
-  is responsible for keeping those lines to 72 characters or fewer.
 
 ## Comments and Formatting
 

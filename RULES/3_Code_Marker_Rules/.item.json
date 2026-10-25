@@ -15,5 +15,6 @@
   "tag": "cmr",
   "source": "rule_sources/Code_Marker_Rules.md",
   "sha256": "433787cb60b8ebf11e85526c995e4fb9af5bf662cfcd293ce059bd8dba524f67",
-  "refreshed": "2026-10-25T17:40:22Z"
+  "refreshed": "2026-10-25T17:40:22Z",
+  "title": "Code Marker Rules"
 }

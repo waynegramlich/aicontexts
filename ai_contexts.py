@@ -8,6 +8,13 @@ start of each Claude Code session, and `AI_Contexts_Rules.md` (from
 `RULES_TEXT`) into every collection (see `README.md` and `HELP`).
 """
 
+# `pylint`'s size limits are turned off for this module: every variable
+# has a type hint (which `pylint` counts as a local), and the program is
+# a single file by design.
+# pylint: disable=too-many-lines,too-many-locals,too-many-statements
+# pylint: disable=too-many-return-statements,too-many-branches
+# pylint: disable=too-many-instance-attributes,too-many-public-methods
+
 import contextlib
 import glob
 import hashlib
@@ -120,7 +127,7 @@ The states of a "rules" collection are Active and InActive (new rules are
 InActive), set with `activate` and `deactivate`.  A rule has a Details.md
 but no Context.md or Summary.md, and rules are not in Startup.md.  Each
 rule has a source file, kept relative to the directory that holds the
-collections, and a read-only copy of it in the rule's directory.  Every
+collections, and its Details.md is a read-only copy of it.  Every
 run copies a changed source again, unless the copy was edited in place,
 and writes RULES/Active_Rules.md, which imports the copies of the Active
 rules; add `@RULES/Active_Rules.md` to CLAUDE.md.  A rule must stand
@@ -277,9 +284,9 @@ Every run reports an `@` import in `CLAUDE.md` whose file does not
 exist; Claude tells the user about it.
 
 `RULES/` is a rules collection (`ai_contexts r type` prints a
-collection's type).  Each rule is a read-only copy of a source file
-elsewhere (e.g. `../claude_code_rules/Version_Control_Rules.md`), made
-and refreshed by `ai_contexts`; its states are Active and InActive
+collection's type).  Each rule's `Details.md` is a read-only copy of a
+source file elsewhere (e.g. `../claude_code_rules/Version_Control_Rules.md`),
+made and refreshed by `ai_contexts`; its states are Active and InActive
 (`ai_contexts r activate R.vcr`, `ai_contexts r deactivate R.vcr`).
 Claude never edits a rule's copy: a change to a rule is made in its
 source (and only when asked), and the next `ai_contexts` run copies it.
@@ -331,8 +338,9 @@ class CollectionType:
     * `commands` (`tuple[str, ...]`): The type's other commands.
     * `files` (`tuple[str, ...]`): The Markdown files of each item.
     * `in_startup` (`bool`): True if `Startup.md` imports the files.
-    * `has_sources` (`bool`): True if each item is a copy of a source
-      file (see `Items.check_rules()`).
+    * `has_sources` (`bool`): True if each item's `Details.md` is a
+      copy of a source file (see `Items.check_rules()`), and its title
+      is kept in `.item.json`.
 
     Constructor:
     * `CollectionType(states, new_state, finished_states,
@@ -1836,7 +1844,8 @@ class Items:
     def copy_path(self, item: Item) -> Path:
         """Return where the copy of a rule's source goes.
 
-        It is in the item directory, with the source file's name.
+        It is the rule's `Details.md`, so that a rule is read from the
+        same file as the details of a task or an issue.
 
         Arguments:
         * `item` (`Item`):
@@ -1845,7 +1854,62 @@ class Items:
         Returns:
         * (`Path`): The path of the copy.
         """
-        return self.directories[item.name] / Path(item.source).name
+        return self.directories[item.name] / "Details.md"
+
+    # Method `Items.upgrade_rule()`:
+    def upgrade_rule(self, item: Item) -> None:
+        """Move a rule from the old layout to the new one.
+
+        A rule once had a `Details.md` holding only its heading, and a
+        copy of its source with the source's name.  Its title goes into
+        `.item.json`, the heading-only `Details.md` is removed, and the
+        copy becomes `Details.md` (its hash does not change), unless a
+        newer copy is already there, when the old one is removed.  What
+        was done, or what went wrong, goes to stderr.
+
+        Arguments:
+        * `item` (`Item`):
+          The rule.
+        """
+        # Find the rule's files.
+        tag: str = f"{self.prefix}{item.tag}"
+        item_directory: Path = self.directories[item.name]
+        details_path: Path = item_directory / "Details.md"
+        old_copy: Path = item_directory / Path(item.source).name
+        try:
+            # Keep the title in `.item.json`.
+            metadata: dict[str, object] = read_item(item_directory)
+            if "title" not in metadata:
+                metadata["title"] = item.title
+                write_item(item_directory, metadata)
+
+            # Remove a `Details.md` that only holds its heading.  A copy
+            # of a source is read-only, so it is never taken for one.
+            if (
+                details_path.is_file()
+                and os.access(details_path, os.W_OK)
+                and read_file(details_path).count("\n") <= 1
+                and read_file(details_path).startswith(f"# {item.number} ")
+            ):
+                details_path.unlink()
+
+            # Make the copy with the source's name the `Details.md`, or
+            # remove it if a newer copy was already made there.
+            if item.source and old_copy != details_path and old_copy.is_file():
+                if details_path.exists():
+                    old_copy.unlink()
+                    print(
+                        f"Removed the old copy '{old_copy}' of {tag}",
+                        file=sys.stderr,
+                    )
+                else:
+                    old_copy.rename(details_path)
+                    print(
+                        f"Moved the copy of {tag} to '{details_path}'",
+                        file=sys.stderr,
+                    )
+        except (OSError, ValueError) as error:
+            print(f"Unable to upgrade {tag}: {error}", file=sys.stderr)
 
     # Method `Items.save_settings()`:
     def save_settings(self, settings: dict[str, object]) -> str:
@@ -1977,21 +2041,34 @@ class Items:
                 print(f"Skipping '{item_directory}': {name}", file=sys.stderr)
                 continue
 
-            # Read the metadata and the `Details.md` heading.
+            # Read the metadata and the `Details.md` heading.  A rule's
+            # `Details.md` is the copy of its source, so it is only read
+            # for the title of a rule in the old layout (see
+            # `upgrade_rule()`).
             title: str = cleaned_title.replace("_", " ")
+            sources: bool = self.collection_type.has_sources
+            details_path: Path = item_directory / "Details.md"
             try:
                 metadata: dict[str, object] = read_item(item_directory)
                 state: str = str(metadata.get("state"))
-                details: str = read_file(item_directory / "Details.md")
+                details: str = (
+                    read_file(details_path)
+                    if not sources
+                    or ("title" not in metadata and details_path.exists())
+                    else ""
+                )
                 heading: str = details.partition("\n")[0]
             except (OSError, ValueError) as error:
                 print(f"Skipping '{item_directory}': {error}", file=sys.stderr)
                 continue
 
-            # The title in the heading wins over the directory name's.
+            # The title in the heading wins over the directory name's,
+            # and a rule's title in `.item.json` wins over both.
             prefix: str = f"# {number} "
             if heading.startswith(prefix):
                 title = heading[len(prefix) :].strip()
+            if sources and isinstance(metadata.get("title"), str):
+                title = str(metadata["title"]).strip() or title
 
             # The state must be one of the type's states.
             states: tuple[str, ...] = self.collection_type.states
@@ -2021,6 +2098,10 @@ class Items:
                 str(metadata.get("source", "")),
             )
             self.directories[name] = item_directory
+
+            # Move a rule in the old layout to the new one.
+            if sources:
+                self.upgrade_rule(self.items[name])
 
         # Fix and check what was loaded.
         self.add_missing_tags()
@@ -2262,33 +2343,38 @@ class Items:
             where: str = f"'{item_directory}'"
             tags.setdefault(item.tag, []).append(item.number)
 
-            # Fix or report the number in the `Details.md` heading.
+            # Fix or report the number in the `Details.md` heading.  A
+            # rule's `Details.md` is the copy of its source, with its
+            # source's heading, so it is left alone.
             try:
                 details_path: Path = item_directory / "Details.md"
-                details: str = read_file(details_path)
-                heading: str
-                rest: str
-                heading, _, rest = details.partition("\n")
-                words: list[str] = heading.split(" ", 2)
-                if (
-                    len(words) == 3
-                    and words[0] == "#"
-                    and words[1] != item.number
-                    and not isinstance(parse_number(words[1]), str)
-                ):
-                    write_file(
-                        details_path, f"# {item.number} {words[2]}\n{rest}"
-                    )
-                    item.title = words[2].strip()
-                    messages.append(
-                        f"Fixed the item number in the heading of {where}"
-                    )
-                elif not heading.startswith(f"# {item.number} "):
-                    messages.append(
-                        f"{where}: its Details.md does not start with a "
-                        f"'# {item.number} TITLE' heading; `ai_contexts "
-                        f"{self.prefix}{item.tag} rename to TITLE` adds one"
-                    )
+                if not self.collection_type.has_sources:
+                    details: str = read_file(details_path)
+                    heading: str
+                    rest: str
+                    heading, _, rest = details.partition("\n")
+                    words: list[str] = heading.split(" ", 2)
+                    if (
+                        len(words) == 3
+                        and words[0] == "#"
+                        and words[1] != item.number
+                        and not isinstance(parse_number(words[1]), str)
+                    ):
+                        write_file(
+                            details_path,
+                            f"# {item.number} {words[2]}\n{rest}",
+                        )
+                        item.title = words[2].strip()
+                        messages.append(
+                            f"Fixed the item number in the heading of {where}"
+                        )
+                    elif not heading.startswith(f"# {item.number} "):
+                        messages.append(
+                            f"{where}: its Details.md does not start with a "
+                            f"'# {item.number} TITLE' heading; `ai_contexts "
+                            f"{self.prefix}{item.tag} rename to TITLE` adds "
+                            "one"
+                        )
 
                 # Report a title that does not match the directory.
                 if (
@@ -2769,17 +2855,25 @@ class Items:
             tag=tag,
         )
 
-        # Write its directory and files.
+        # Write its directory and files.  A rule keeps its title in
+        # `.item.json`, since its `Details.md` is the copy of its
+        # source.
+        sources: bool = self.collection_type.has_sources
         try:
             item_directory.mkdir()
             write_item(
-                item_directory, {**new_metadata(item.state, stamp), "tag": tag}
+                item_directory,
+                {**new_metadata(item.state, stamp), "tag": tag}
+                | ({"title": title} if sources else {}),
             )
             if self.has_file("Context.md"):
                 write_file(
                     item_directory / "Context.md", "# LLM Agent Context Log\n"
                 )
-            write_file(item_directory / "Details.md", f"# {number} {title}\n")
+            if not sources:
+                write_file(
+                    item_directory / "Details.md", f"# {number} {title}\n"
+                )
             if self.has_file("Summary.md"):
                 write_summary_heading(
                     item_directory,
@@ -2830,7 +2924,9 @@ class Items:
 
         The item directory is renamed to match, and the heading line of
         its `Details.md` is rewritten, or added if it is missing, as is
-        the heading of its `Summary.md`.  The tag is made from the new
+        the heading of its `Summary.md`.  A rule's title is kept in
+        `.item.json` instead, since its `Details.md` is the copy of its
+        source.  The tag is made from the new
         title, unless it would be the same as before.  The updated time
         is set to now.
 
@@ -2875,21 +2971,26 @@ class Items:
             )
 
         # Rewrite the headings, record the tag and rename the directory.
+        sources: bool = self.collection_type.has_sources
         details_path: Path = old_directory / "Details.md"
         try:
-            details: str = read_file(details_path)
-            heading: str
-            rest: str
-            heading, _, rest = details.partition("\n")
-            if not heading.startswith(f"# {number} "):
-                rest = details
-            write_file(details_path, f"# {number} {title}\n{rest}")
+            if not sources:
+                details: str = read_file(details_path)
+                heading: str
+                rest: str
+                heading, _, rest = details.partition("\n")
+                if not heading.startswith(f"# {number} "):
+                    rest = details
+                write_file(details_path, f"# {number} {title}\n{rest}")
             if self.has_file("Summary.md"):
                 write_summary_heading(
                     old_directory,
                     summary_heading(f"{self.prefix}{tag}", title),
                 )
-            updated: str = update_item(old_directory, fields={"tag": tag})
+            fields: dict[str, object] = {"tag": tag}
+            if sources:
+                fields["title"] = title
+            updated: str = update_item(old_directory, fields=fields)
             old_directory.rename(new_directory)
         except (OSError, ValueError) as error:
             return f"Unable to rename item '{number}': {error}"
@@ -4032,12 +4133,19 @@ class Items:
         if name not in self.items:
             return f"Item '{number_text(name)}' does not exist"
 
-        # Read its metadata and `Details.md`.
+        # Read its metadata and `Details.md` (which a rule may not have
+        # until its source is copied).
         item: Item = self.items[name]
         item_directory: Path = self.directories[name]
+        details_path: Path = item_directory / "Details.md"
         try:
             metadata: dict[str, object] = read_item(item_directory)
-            details: str = read_file(item_directory / "Details.md")
+            details: str = (
+                read_file(details_path)
+                if details_path.exists()
+                or not self.collection_type.has_sources
+                else ""
+            )
         except (OSError, ValueError) as error:
             return f"Unable to read item '{item.number}': {error}"
 
@@ -4559,8 +4667,12 @@ class Items:
             # The tests are in `ai_contexts_test.py`, next to this file
             # (even when ai_contexts is run through a symbolic link).
             # They are not run from here when coverage is measured,
-            # which runs `ai_contexts_test.py` itself.
+            # which runs `ai_contexts_test.py` itself.  They are only
+            # imported here, so that a normal run does not load them,
+            # and they import this module, which `pylint` reports as a
+            # cyclic import.
             sys.path.insert(0, str(Path(__file__).resolve().parent))
+            # pylint: disable-next=import-outside-toplevel,cyclic-import
             import ai_contexts_test
 
             return ai_contexts_test.test()
@@ -4821,6 +4933,9 @@ def do_transfer(directory: Path, plan: dict[str, object], phase: int) -> str:
     # Read the plan.
     marker: Path = directory / TRANSFER_FILE
     target: Path = directory.parent / str(plan["target"])
+    copies: bool = TYPES.get(
+        type_name(target), TYPES[DEFAULT_TYPE]
+    ).has_sources
     stamp: str = str(plan["time"])
     items: list[dict[str, str]] = plan_list(plan, "items", TRANSFER_KEYS)
 
@@ -4893,9 +5008,10 @@ def do_transfer(directory: Path, plan: dict[str, object], phase: int) -> str:
                 continue
             step()
 
-            # Fix the number in the `Details.md` heading.
+            # Fix the number in the `Details.md` heading (a rule's is
+            # the copy of its source, which is left alone).
             details_path: Path = temporary / "Details.md"
-            details: str = read_file(details_path)
+            details: str = "" if copies else read_file(details_path)
             prefix: str = f"# {item['old_number']} "
             if details.startswith(prefix):
                 write_file(
@@ -5107,10 +5223,14 @@ def do_renumber(
                 step()
                 path(rename, "temporary").rename(path(rename, "new"))
 
-        # Phase 3: fix the number in each `Details.md` heading.
+        # Phase 3: fix the number in each `Details.md` heading (a
+        # rule's is the copy of its source, which is left alone).
+        copies: bool = TYPES.get(
+            type_name(directory), TYPES[DEFAULT_TYPE]
+        ).has_sources
         for rename in renames:
             details_path: Path = path(rename, "new") / "Details.md"
-            details: str = read_file(details_path)
+            details: str = "" if copies else read_file(details_path)
             prefix: str = f"# {rename['old_number']} "
             if details.startswith(prefix):
                 step()

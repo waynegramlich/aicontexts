@@ -1,5 +1,11 @@
 """The tests of ai_contexts, run by `ai_contexts --test`."""
 
+# `pylint`'s size limits are turned off for this module: every variable
+# has a type hint (which `pylint` counts as a local), and the tests are
+# long tables of checks.
+# pylint: disable=too-many-lines,too-many-locals,too-many-statements
+# pylint: disable=too-many-branches
+
 import contextlib
 import hashlib
 import io
@@ -108,6 +114,8 @@ def test() -> int:
         _test_commands(check, Path(temporary) / "commands")
     with tempfile.TemporaryDirectory() as temporary:
         _test_types(check, Path(temporary))
+    with tempfile.TemporaryDirectory() as temporary:
+        _test_rule_moves(check, Path(temporary))
     with tempfile.TemporaryDirectory() as temporary:
         _test_rules(check, Path(temporary))
     with tempfile.TemporaryDirectory() as temporary:
@@ -1234,12 +1242,12 @@ def _test_references(check: Check, directory: Path) -> None:
     )
     (other / "Context.md").chmod(0o644)
 
-    def refuse_writes(question: str) -> str:
+    def refuse_writes(_question: str) -> str:
         """Make `notes.md` read-only, then answer yes.
 
         Arguments:
-        * `question` (`str`):
-          The question.
+        * `_question` (`str`):
+          The question, which is not used.
 
         Returns:
         * (`str`): "y".
@@ -2225,10 +2233,48 @@ def _test_types(check: Check, directory: Path) -> None:
 
         # Check the files of a rule.
         rule: Path = directory / "RULES" / "1_Version_Rules"
+        details: Path = rule / "Details.md"
         check(
             sorted(path.name for path in rule.iterdir())
-            == [ITEM_FILE, "Details.md", "Version_Control_Rules.md"],
-            "a rule has only a Details.md and its copy",
+            == [ITEM_FILE, "Details.md"]
+            and read_file(details) == "# Use hg\n"
+            and details.stat().st_mode & 0o777 == 0o444
+            and read_item(rule)["title"] == "Version Rules",
+            "a rule's Details.md is the copy of its source",
+        )
+
+        # Move a rule in the old layout (a heading-only `Details.md`, a
+        # copy with the source's name and no title in `.item.json`) to
+        # the new one.
+        details.rename(rule / "Version_Control_Rules.md")
+        write_file(details, "# 1 Version Rules\n")
+        metadata: dict[str, object] = read_item(rule)
+        del metadata["title"]
+        write_item(rule, metadata)
+        code, text = run("r", "ls")
+        check(
+            code == 0
+            and f"Moved the copy of R.vr to '{details}'" in text
+            and sorted(path.name for path in rule.iterdir())
+            == [ITEM_FILE, "Details.md"]
+            and read_file(details) == "# Use hg\n"
+            and read_item(rule)["title"] == "Version Rules"
+            and "R.vr  Version Rules" in text
+            and "edited in place" not in text,
+            "a rule in the old layout is moved to the new one",
+        )
+
+        # Replace a heading-only `Details.md` with the copy, rather
+        # than taking it for an edited copy.
+        details.unlink()
+        write_file(details, "# 1 Version Rules\n")
+        code, text = run("r", "ls")
+        check(
+            code == 0
+            and "Refreshed R.vr" in text
+            and "edited in place" not in text
+            and read_file(details) == "# Use hg\n",
+            "a heading-only Details.md is replaced by the copy",
         )
 
         # Check where the type is kept, and that rules are not in
@@ -2247,7 +2293,7 @@ def _test_types(check: Check, directory: Path) -> None:
         )
 
         # Skip a rule in a state of another type.
-        metadata: dict[str, object] = read_item(rule)
+        metadata = read_item(rule)
         write_item(rule, {**metadata, "state": "Open"})
         code, text = run("r", "ls")
         check(
@@ -2305,6 +2351,92 @@ def _test_types(check: Check, directory: Path) -> None:
             )
         finally:
             empty.chmod(0o600)
+    finally:
+        os.chdir(original)
+
+
+# Function `_test_rule_moves()`:
+def _test_rule_moves(check: Check, directory: Path) -> None:
+    """Test moving and transferring rules, whose copies are left alone.
+
+    A rule's `Details.md` is the read-only copy of its source, so its
+    heading is never renumbered, even one that looks like an item
+    number heading.
+
+    Arguments:
+    * `check` (`Check`):
+      Records a check: a condition that should be true and its
+      description.
+    * `directory` (`Path`):
+      The directory to test in.
+    """
+    # Run the commands from inside the test directory, with two rule
+    # sources whose headings look like item number headings.
+    answers: list[str] = []
+    run: Callable[..., tuple[int, str]] = _runner(answers)
+    original: Path = Path.cwd()
+    os.chdir(directory)
+    (directory / "sources").mkdir()
+    write_file(directory / "sources" / "Alpha_Rules.md", "# 2 Alpha\n")
+    write_file(directory / "sources" / "Code_Rules.md", "# 2 Code\n")
+    try:
+        # Make two rules collections with the rules in the first.
+        answer: str
+        arguments: tuple[str, ...]
+        code: int
+        text: str
+        for answer, arguments in (
+            ("y", ("RULES", "create")),
+            ("", ("r", "type", "rules")),
+            ("y", ("POLICIES", "create")),
+            ("", ("p", "type", "rules")),
+            ("", ("r", "cr", "1", "sources/Alpha_Rules.md")),
+            ("", ("r", "cr", "2", "sources/Code_Rules.md")),
+        ):
+            answers[:] = [answer] if answer else []
+            code, text = run(*arguments)
+            check(code == 0, f"rule moves setup {' '.join(arguments)!r}")
+
+        # Move the second rule first: its copy keeps its heading.
+        rules: Path = directory / "RULES"
+        answers[:] = ["y"]
+        code, text = run("r", "mo", "2", "before", "1")
+        moved: Path = rules / "1_Code_Rules" / "Details.md"
+        check(
+            code == 0
+            and read_file(moved) == "# 2 Code\n"
+            and moved.stat().st_mode & 0o777 == 0o444
+            and read_file(rules / "2_Alpha_Rules" / "Details.md")
+            == "# 2 Alpha\n",
+            "a moved rule's copy is left alone",
+        )
+        code, text = run("r", "ls")
+        check(
+            code == 0 and "edited in place" not in text,
+            "a moved rule's copy is not taken for an edited one",
+        )
+
+        # Transfer the other rule (now number 2) to the other rules
+        # collection, and back.
+        answers[:] = ["y", "y"]
+        code, text = run("r", "tr", "R.ar", "p")
+        transferred: Path = directory / "POLICIES" / "1_Alpha_Rules"
+        check(
+            code == 0
+            and read_file(transferred / "Details.md") == "# 2 Alpha\n"
+            and read_item(transferred)["title"] == "Alpha Rules"
+            and (rules / "1_Code_Rules" / "Details.md").is_file(),
+            "a transferred rule's copy is left alone",
+        )
+        answers[:] = ["y", "y"]
+        code, text = run("p", "tr", "P.ar", "r")
+        check(
+            code == 0
+            and read_file(rules / "2_Alpha_Rules" / "Details.md")
+            == "# 2 Alpha\n"
+            and "edited in place" not in run("r", "ls")[1],
+            "a rule transferred back keeps its copy",
+        )
     finally:
         os.chdir(original)
 
@@ -2386,7 +2518,7 @@ def _test_rules(check: Check, directory: Path) -> None:
 
         # Check the copies of the sources.
         rule: Path = rules / "2_Alpha_Rule"
-        copy: Path = rule / "Alpha_Rule.md"
+        copy: Path = rule / "Details.md"
         metadata: dict[str, object] = read_item(rule)
         check(
             metadata["source"] == "../shared/Alpha_Rule.md"
@@ -2399,7 +2531,7 @@ def _test_rules(check: Check, directory: Path) -> None:
         check(
             read_item(rules / "1_Link_Rule")["source"]
             == "../shared/Link_Rule.md"
-            and read_file(rules / "1_Link_Rule" / "Link_Rule.md")
+            and read_file(rules / "1_Link_Rule" / "Details.md")
             == read_file(copy),
             "a source's directories are resolved, but not its file",
         )
@@ -2408,13 +2540,13 @@ def _test_rules(check: Check, directory: Path) -> None:
         check(read_file(active) == "", "no Active rules")
         check(
             run("r", "act", "2")[0] == 0
-            and read_file(active) == "@2_Alpha_Rule/Alpha_Rule.md\n",
+            and read_file(active) == "@2_Alpha_Rule/Details.md\n",
             "Active_Rules.md imports the Active rules",
         )
         check(
             run("r", "act", "-r", "1")[0] == 0
             and read_file(active)
-            == "@1_Link_Rule/Link_Rule.md\n@2_Alpha_Rule/Alpha_Rule.md\n",
+            == "@1_Link_Rule/Details.md\n@2_Alpha_Rule/Details.md\n",
             "Active_Rules.md is in number order",
         )
 
@@ -2523,9 +2655,9 @@ def _test_rules(check: Check, directory: Path) -> None:
         # Check that a new source replaces the old copy.
         check(
             sorted(path.name for path in (rules / "1_Link_Rule").iterdir())
-            == [ITEM_FILE, "Beta_Rule.md", "Details.md"]
+            == [ITEM_FILE, "Details.md"]
             and read_file(active)
-            == "@1_Link_Rule/Beta_Rule.md\n@2_Alpha_Rule/Alpha_Rule.md\n",
+            == "@1_Link_Rule/Details.md\n@2_Alpha_Rule/Details.md\n",
             "a new source replaces the old copy",
         )
 
@@ -2564,12 +2696,12 @@ def _test_rules(check: Check, directory: Path) -> None:
         )
 
         # Check an Active rule without a copy.
-        (rules / "1_Link_Rule" / "Beta_Rule.md").unlink()
+        (rules / "1_Link_Rule" / "Details.md").unlink()
         code, text = run("r", "ls")
         check(
             "R.lr: its source '../shared/Beta_Rule.md' is missing\n" in text
             and "R.lr is Active but has no copy of its source" in text
-            and read_file(active) == "@2_Alpha_Rule/Alpha_Rule.md\n",
+            and read_file(active) == "@2_Alpha_Rule/Details.md\n",
             "an Active rule without a copy",
         )
         check(run("r", "refresh", "1")[0] == 1, "refresh a missing source")
@@ -2644,7 +2776,7 @@ def _test_rule_failures(
 
     # Check a copy that can not be read.
     rule: Path = rules / "2_Alpha_Rule"
-    copy: Path = rule / "Alpha_Rule.md"
+    copy: Path = rule / "Details.md"
     copy.chmod(0o000)
     try:
         code, text = run("r", "ls")
@@ -2680,6 +2812,31 @@ def _test_rule_failures(
         run("r", "source", "2", "../shared/Alpha_Rule.md")[0] == 0
         and copy.is_file(),
         "set a source again after failures",
+    )
+
+    # Check a rule in the old layout whose title can not be recorded,
+    # and then moving it to the new layout.
+    copy.rename(rule / "Alpha_Rule.md")
+    metadata: dict[str, object] = read_item(rule)
+    del metadata["title"]
+    write_item(rule, metadata)
+    (rule / ITEM_FILE).chmod(0o400)
+    try:
+        code, text = run("r", "ls")
+        check(
+            "Unable to upgrade R.ar" in text
+            and (rule / "Alpha_Rule.md").is_file(),
+            "a rule whose title can not be recorded is not upgraded",
+        )
+    finally:
+        (rule / ITEM_FILE).chmod(0o600)
+    code, text = run("r", "ls")
+    check(
+        "Removed the old copy" in text
+        and copy.is_file()
+        and not (rule / "Alpha_Rule.md").exists()
+        and read_item(rule)["title"] == "Alpha Rule",
+        "a rule is upgraded once its title can be recorded",
     )
 
 
@@ -2802,7 +2959,7 @@ def _test_rule_doubts(check: Check, directory: Path) -> None:
         answers[:] = ["yes"]
         code, text = run("r", "cr", "3", "../shared/README.md")
         check(
-            code == 0 and (rules / "3_README" / "README.md").is_file(),
+            code == 0 and (rules / "3_README" / "Details.md").is_file(),
             "a doubtful file is used when the answer is yes",
         )
 
@@ -3222,10 +3379,10 @@ def _test_transfer_recovery(check: Check, directory: Path) -> None:
         _test_interrupted_transfer(
             check,
             directory / f"{name[0]}",
-            name,
-            place,
-            word,
-            sorted(expected),
+            name=name,
+            place=place,
+            word=word,
+            expected=sorted(expected),
         )
 
     # The remaining checks need permissions.
@@ -3246,9 +3403,10 @@ def _test_transfer_recovery(check: Check, directory: Path) -> None:
 
 
 # Function `_test_interrupted_transfer()`:
-def _test_interrupted_transfer(
+def _test_interrupted_transfer(  # pylint: disable=too-many-arguments
     check: Check,
     directory: Path,
+    *,
     name: tuple[int, ...],
     place: str,
     word: str,
@@ -3256,7 +3414,9 @@ def _test_interrupted_transfer(
 ) -> None:
     """Interrupt a transfer of a TASKS item after each step.
 
-    Each time, the next load must finish the transfer.
+    Each time, the next load must finish the transfer.  The keyword
+    arguments describe one transfer, so `pylint`'s `too-many-arguments`
+    is turned off for this function.
 
     Arguments:
     * `check` (`Check`):

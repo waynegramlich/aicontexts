@@ -1,4 +1,4 @@
-# GitHub Actions Rules
+# GitHub Workflow Rules
 
 <!-- --------------------------- 79 characters ---------------------------- -->
 

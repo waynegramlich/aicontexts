@@ -6,7 +6,7 @@ These rules set up a GitHub account protected by hardware two-factor
 authentication (2FA), the `gh` command that Claude uses to drive it, and
 a project's GitHub repository.  They come from the `ezpkg` project
 (October 2026), where the same keys also protect test.pypi.org and
-pypi.org.  `GitHub_Actions_Rules.md` builds on them.
+pypi.org.  `GitHub_Workflow_Rules.md` builds on them.
 
 ## Who Does What
 
@@ -49,7 +49,7 @@ pypi.org.  `GitHub_Actions_Rules.md` builds on them.
   `60-fido-id.rules` (both standard on Ubuntu 24.04).  If a browser
   ignores the key's touch, suspect the udev rules first.
 * No API tokens are ever made, on GitHub or PyPI: publishing uses
-  Trusted Publishing (`GitHub_Actions_Rules.md`), so the GitHub account is
+  Trusted Publishing (`GitHub_Workflow_Rules.md`), so the GitHub account is
   as much a gate on a release as the PyPI one.
 
 ## The `gh` Command

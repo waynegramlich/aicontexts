@@ -14,6 +14,7 @@
   ],
   "tag": "pcr",
   "source": "rule_sources/Python_Coding_Rules.md",
-  "sha256": "960d77a2293078f55bdc4297f56dcf7dd2d5dc73e72d2c67eb963cbd5b4098bb",
-  "refreshed": "2026-10-25T17:40:22Z"
+  "sha256": "aa67e8807d27e53e253ad85415b78ae7c18549901e34003dc4872e3e9c284d80",
+  "refreshed": "2026-10-25T19:31:34Z",
+  "title": "Python Coding Rules"
 }

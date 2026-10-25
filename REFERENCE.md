@@ -53,7 +53,8 @@ with the following information:
   A hidden file managed by `ai_contexts` that holds the State, Tag, Priority,
   the created and updated times (in UTC), and a history of every State
   change, and of every transfer to another collection; for a rule, also
-  its source, the SHA-256 of its copy and when the copy was refreshed.
+  its Title, its source, the SHA-256 of its copy (its `Details.md`) and
+  when the copy was refreshed.
 
 <!-- Let's mostly focus on the stuff above. -->
 
@@ -159,13 +160,17 @@ copies each rule into the project:
 `create PLACE FILE...` makes one rule from each file (or glob pattern), at
 PLACE and then after it, titled from the file name
 (`Version_Control_Rules.md` is "Version Control Rules").  Each rule
-directory holds a `Details.md` (why the project uses the rule; it is not
-loaded), the `.item.json` and a read-only copy of the source file with the
-same name (e.g.
-`RULES/1_Version_Control_Rules/Version_Control_Rules.md`).  The source is
-kept relative to the directory that holds the collections, with its
-directories resolved to real ones; `ai_contexts r source R.vcr FILE`
-changes it.
+directory holds only a `Details.md` and the `.item.json`, like a Task or
+an Issue (which also have a `Context.md` and a `Summary.md`).  A rule's
+`Details.md` is a read-only copy of its source file (e.g.
+`RULES/1_Version_Control_Rules/Details.md` for
+`../claude_code_rules/Version_Control_Rules.md`), so it starts with the
+source's own heading, which `ai_contexts` leaves alone; the rule's title
+is kept in `.item.json` instead.  (A rule made before this had a
+heading-only `Details.md` and a copy with the source's name; the next
+run moves it to the new layout.)  The source is kept relative to the
+directory that holds the collections, with its directories resolved to
+real ones; `ai_contexts r source R.vcr FILE` changes it.
 
 Some files are not meant to be rules, and a glob like `*.md` can pick
 them up.  `create` and `source` insist on a file whose name ends in
