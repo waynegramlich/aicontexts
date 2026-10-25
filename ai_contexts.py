@@ -133,7 +133,10 @@ ignoring "a", "an", "of" and "the" (e.g. "Division by Zero is Bad" in
 ISSUES is `I.dbzib`).  When a tag is already used in the collection, the
 new item gets the lowest free number added (e.g. `I.cde2`).  Collections
 must start with different letters.  A tag (with or without its prefix,
-in any case) may be used wherever an item NUMBER is expected.
+in any case) may be used wherever an item NUMBER is expected.  Text
+refers to an item as its tag, `~` and its number when the text was
+written (e.g. `I.dbzib~3`); the `~NUMBER` is accepted and ignored, since
+it is never updated.
 
 When priority is enabled for a collection, its items are listed by
 priority first (0 to 3, then none) and the priority is shown.
@@ -181,10 +184,15 @@ containing:
 
 Each item has a tag (e.g. `I.dbzib` for "Division by Zero is Bad" in
 `ISSUES/`), shown by `ai_contexts t ls`; `ai_contexts I.dbzib show`
-shows everything about it.  Use the tag, in back quotes, to refer to an
-item in Markdown text and commit messages; never use item numbers, which
-change when items are deleted or moved.  Commands accept a tag (in any
-case, but never shortened) wherever they take a number, and a tag can
+shows everything about it.  To refer to an item in Markdown text and
+commit messages, use its tag followed by `~` and its current number, in
+back quotes (e.g. `I.dbzib~3`), so that its directory
+(`ISSUES/3_Division_by_Zero_is_Bad/`) is easy to find.  Never use the
+number alone.  Numbers change when items are created, deleted, moved or
+transferred, and a `~NUMBER` is never updated: it records the number
+when it was written, and the tag is what names the item.  Commands
+accept a tag (in any case, but never shortened, and with or without a
+`~NUMBER`, which is ignored) wherever they take a number, and a tag can
 stand in for its collection (`ai_contexts T.fbm close`).  Renaming an
 item can change its tag; `ai_contexts` then lists the `.md` files that
 use the old tag and offers to update them, and Claude answers yes (after
@@ -213,8 +221,10 @@ Task that turns out to be an Issue) is moved there, with its children,
 by `ai_contexts t transfer T.fbm issues [PLACE]`.  Its tag gets the new
 prefix (`T.fbm` becomes `I.fbm`), and `ai_contexts` offers to update the
 `.md` files that use the old tags; as for a rename, Claude answers yes
-after checking the list.  Old tags are not looked up afterwards, so text
-must use the new ones.
+after checking the list.  The update drops an old tag's `~NUMBER`
+(`T.fbm~12` becomes `I.fbm`), since that number was in the other
+collection.  Old tags are not looked up afterwards, so text must use the
+new ones.
 
 When priority is enabled for a collection (e.g. `ai_contexts i enable
 priority`), items may have a priority set with `ai_contexts i priority
@@ -237,10 +247,11 @@ treated like a Closed one, and its `Summary.md` says why.
 
 Before closing an item, Claude writes its `Summary.md` (below the
 heading line that `ai_contexts` maintains): what was decided and done,
-with the tags of related items.  Once the item is closed, only that
-summary is loaded at startup (and after the 50 most recently closed,
-only its tag and title, in the generated `TASKS/Closed.md`), so it
-should be enough to know that the item exists and what it settled.
+with the tags (and `~NUMBER`s) of related items.  Once the item is
+closed, only that summary is loaded at startup (and after the 50 most
+recently closed, only its tag and title, in the generated
+`TASKS/Closed.md`), so it should be enough to know that the item exists
+and what it settled.
 `ai_contexts T.fbm show` and the item's files give the rest when needed.
 
 Every time `ai_contexts` is successfully run, it rewrites these files,
@@ -1730,7 +1741,9 @@ class Items:
         Arguments:
         * `word` (`str`):
           An item number like "1.2.3", or a tag with or without the
-          collection prefix, in any case (e.g. "T.fbm" or "fbm").
+          collection prefix, in any case (e.g. "T.fbm" or "fbm").  A
+          tag may be followed by "~" and the number it had when it was
+          written (e.g. "T.fbm~1.2"), which is checked but not used.
 
         Returns:
         * (`tuple[int, ...] | str`): The item name, or an error string
@@ -1742,8 +1755,16 @@ class Items:
         ):
             return parse_number(word)
 
+        # Drop the number after a "~", which may be out of date.
+        tag: str
+        tilde: str
+        hint: str
+        tag, tilde, hint = word.partition("~")
+        if tilde and isinstance(parse_number(hint), str):
+            return f"Invalid item number '{hint}' after '~' in '{word}'"
+
         # Otherwise look for the tag, with or without the prefix.
-        folded: str = word.casefold()
+        folded: str = tag.casefold()
         item: Item
         for item in self.items.values():
             if item.tag and folded in (
@@ -3878,7 +3899,9 @@ class Items:
         A valid transfer may first ask to continue (see
         `confirm_snapshot()`).  The transferred items and the renumbered
         ones are printed, then the user is offered a change of their old
-        tags in the project's `.md` files (see `update_references()`).
+        tags in the project's `.md` files (see `update_references()`),
+        which drops each old tag's `~NUMBER`, since the number was in
+        the other collection.
 
         Arguments:
         * `arguments` (`list[str]`):
@@ -3985,6 +4008,7 @@ class Items:
                 for old_tag, item in transferred
             },
             ask,
+            drop_numbers=True,
         )
 
     # Method `Items.show_command()`:
@@ -4241,7 +4265,10 @@ class Items:
 
     # Method `Items.update_references()`:
     def update_references(
-        self, tags: dict[str, str], ask: Callable[[str], str]
+        self,
+        tags: dict[str, str],
+        ask: Callable[[str], str],
+        drop_numbers: bool = False,
     ) -> str:
         """Offer to change old tags to new ones in the `.md` files.
 
@@ -4255,6 +4282,10 @@ class Items:
           The new tag of each old tag.
         * `ask` (`Callable[[str], str]`):
           Asks the user a question and returns the answer.
+        * `drop_numbers` (`bool`):
+          True to also remove the `~NUMBER` after an old tag (e.g.
+          "T.fbm~12" becomes "I.fbm"), for a transfer, where the
+          number belonged to the old collection.
 
         Returns:
         * (`str`): An empty string on success, or an error string on
@@ -4296,14 +4327,17 @@ class Items:
         # One pattern changes every tag at once, so that a new tag is
         # never changed again as another's old tag.
         pattern: re.Pattern[str] = re.compile(
-            "|".join(tag_pattern(old_tag).pattern for old_tag in tags)
+            "("
+            + "|".join(tag_pattern(old_tag).pattern for old_tag in tags)
+            + ")"
+            + (r"(?:~\d+(?:\.\d+)*)?" if drop_numbers else "")
         )
         for path in paths:
             try:
                 write_file(
                     path,
                     pattern.sub(
-                        lambda found: tags[found.group(0)], read_file(path)
+                        lambda found: tags[found.group(1)], read_file(path)
                     ),
                 )
             except OSError as error:

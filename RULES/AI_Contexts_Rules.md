@@ -29,10 +29,15 @@ containing:
 
 Each item has a tag (e.g. `I.dbzib` for "Division by Zero is Bad" in
 `ISSUES/`), shown by `ai_contexts t ls`; `ai_contexts I.dbzib show`
-shows everything about it.  Use the tag, in back quotes, to refer to an
-item in Markdown text and commit messages; never use item numbers, which
-change when items are deleted or moved.  Commands accept a tag (in any
-case, but never shortened) wherever they take a number, and a tag can
+shows everything about it.  To refer to an item in Markdown text and
+commit messages, use its tag followed by `~` and its current number, in
+back quotes (e.g. `I.dbzib~3`), so that its directory
+(`ISSUES/3_Division_by_Zero_is_Bad/`) is easy to find.  Never use the
+number alone.  Numbers change when items are created, deleted, moved or
+transferred, and a `~NUMBER` is never updated: it records the number
+when it was written, and the tag is what names the item.  Commands
+accept a tag (in any case, but never shortened, and with or without a
+`~NUMBER`, which is ignored) wherever they take a number, and a tag can
 stand in for its collection (`ai_contexts T.fbm close`).  Renaming an
 item can change its tag; `ai_contexts` then lists the `.md` files that
 use the old tag and offers to update them, and Claude answers yes (after
@@ -61,8 +66,10 @@ Task that turns out to be an Issue) is moved there, with its children,
 by `ai_contexts t transfer T.fbm issues [PLACE]`.  Its tag gets the new
 prefix (`T.fbm` becomes `I.fbm`), and `ai_contexts` offers to update the
 `.md` files that use the old tags; as for a rename, Claude answers yes
-after checking the list.  Old tags are not looked up afterwards, so text
-must use the new ones.
+after checking the list.  The update drops an old tag's `~NUMBER`
+(`T.fbm~12` becomes `I.fbm`), since that number was in the other
+collection.  Old tags are not looked up afterwards, so text must use the
+new ones.
 
 When priority is enabled for a collection (e.g. `ai_contexts i enable
 priority`), items may have a priority set with `ai_contexts i priority
@@ -85,10 +92,11 @@ treated like a Closed one, and its `Summary.md` says why.
 
 Before closing an item, Claude writes its `Summary.md` (below the
 heading line that `ai_contexts` maintains): what was decided and done,
-with the tags of related items.  Once the item is closed, only that
-summary is loaded at startup (and after the 50 most recently closed,
-only its tag and title, in the generated `TASKS/Closed.md`), so it
-should be enough to know that the item exists and what it settled.
+with the tags (and `~NUMBER`s) of related items.  Once the item is
+closed, only that summary is loaded at startup (and after the 50 most
+recently closed, only its tag and title, in the generated
+`TASKS/Closed.md`), so it should be enough to know that the item exists
+and what it settled.
 `ai_contexts T.fbm show` and the item's files give the rest when needed.
 
 Every time `ai_contexts` is successfully run, it rewrites these files,

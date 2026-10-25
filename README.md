@@ -122,6 +122,11 @@ Hierarchical numbers:
   Thus, task `1.3` can only be created after `1.1` and `1.2` exist.
 * They change as tasks are added, moved, inserted and deleted.  This is
   why tags are typically used instead of hierarchical numbers.
+* Text (and the AI) refers to a task by its tag followed by `~` and its
+  number at the time, such as `T.di~1.1`, so that its directory is easy
+  to find.  The number is never updated afterwards, so it records what
+  the number was when the text was written.  `aic` ignores the `~1.1`,
+  so `aic t open T.di~1.1` works too.
 
 ## Context Files
 

@@ -1125,7 +1125,7 @@ def _test_references(check: Check, directory: Path) -> None:
     items.create_item("1", "Fix Big Mistake")
     items.create_item("2", "Other Work")
     other: Path = directory / "TASKS" / "2_Other_Work"
-    text: str = "See T.fbm, T.fbm2, XT.fbm and `T.fbm`.\n"
+    text: str = "See T.fbm, T.fbm2, XT.fbm, `T.fbm~1` and `T.fbm`.\n"
     relative: str
     for relative in (
         "notes.md",
@@ -1208,7 +1208,7 @@ def _test_references(check: Check, directory: Path) -> None:
     # Update the references to a changed tag.
     answers[:] = ["yes"]
     output = rename("Good", "Fix")
-    updated: str = "See T.gf, T.fbm2, XT.fbm and `T.gf`.\n"
+    updated: str = "See T.gf, T.fbm2, XT.fbm, `T.gf~1` and `T.gf`.\n"
     check(
         "Updated T.fbm to T.gf in 2 files" in output
         and read_file(directory / "notes.md") == updated
@@ -1936,6 +1936,12 @@ def _test_commands(check: Check, directory: Path) -> None:
             ("", ("t.I", "ls"), 0, "T.i "),
             ("", ("T.i", "cr", "x"), 1, "can not be used with 'create'"),
             ("", ("T.zz", "show"), 1, "Invalid item number or tag 'T.zz'"),
+            ("", ("T.i~1", "show"), 0, "Tag:       T.i\n"),
+            ("", ("t", "sh", "t.I~9.9"), 0, "Tag:       T.i\n"),
+            ("", ("t", "sh", "T.zz~1"), 1, "number or tag 'T.zz~1'"),
+            ("", ("t", "sh", "T.i~"), 1, "number '' after '~' in 'T.i~'"),
+            ("", ("t", "sh", "T.i~x"), 1, "number 'x' after '~'"),
+            ("", ("t", "sh", "1~1"), 1, "Invalid item number or tag '1~1'"),
             ("", ("Z.x", "ls"), 1, "No collection matches 'Z.x'"),
             ("", ("t", "ls", "T.i"), 0, "T.i   An item\n1.1"),
             ("", ("t", "cl", "t.I"), 0, "Closed     T.i "),
@@ -3140,14 +3146,15 @@ def _test_transfer_failures(
 
     # Check that a transfer updates the references to every old tag.
     notes: Path = tasks.parent / "notes.md"
-    write_file(notes, "Fix I.fb and its child I.co, not I.fbx.\n")
+    write_file(notes, "Fix `I.fb~2` and its child I.co~2.1, not I.fbx~3.\n")
     answers[:] = ["y", "y"]
     code, output = run("i", "tr", "I.fb", "t")
     check(
         code == 0
         and "have tags that need to be renamed:\n  notes.md\n" in output
         and "Updated I.fb to T.fb, I.co to T.co in 1 files" in output
-        and read_file(notes) == "Fix T.fb and its child T.co, not I.fbx.\n",
+        and read_file(notes)
+        == "Fix `T.fb` and its child T.co, not I.fbx~3.\n",
         "a transfer updates the references to every old tag",
     )
 

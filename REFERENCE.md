@@ -24,8 +24,12 @@ with the following information:
   letters.  A tag is unique within its collection; when it would clash,
   the newer Item gets the lowest free number added (e.g. `I.cde2`.)  A
   tag never changes on its own, since tags show up in commit messages and
-  the like.  Text refers to Items by tag, never by number, and commands
-  accept a tag wherever they take a Number.
+  the like.  Text refers to an Item by its tag, `~` and its Number when
+  the text was written (e.g. `I.dbzib~3`), never by Number alone.  The
+  `~NUMBER` is only a help in finding the Item's directory: it is never
+  updated, so it records history and may be out of date.  Commands
+  accept a tag (with or without a `~NUMBER`, which is ignored) wherever
+  they take a Number.
 * Priority:
   An optional level: 0 (catastrophic), 1 (high), 2 (medium) or 3 (low).
   Priority is enabled per collection (`ai_contexts i enable priority`);
@@ -101,7 +105,9 @@ free number, as for `create`); a transfer back gets the old tag back if it
 is free.  The title, state and its history, priority and files are kept,
 and the transfer is recorded in `.item.json` and shown by `show`.  Old
 tags are not looked up, but, as for a rename, `ai_contexts` offers to
-update every `.md` file that uses them, in one pass.  Items can only be
+update every `.md` file that uses them, in one pass; this drops an old
+tag's `~NUMBER` (`T.fbm~12` becomes `I.fbm`), since that number was in
+the other collection.  Items can only be
 transferred between collections of the same type.
 
 `ai_contexts t ls` leaves out Closed Items (unless asked for by number or
