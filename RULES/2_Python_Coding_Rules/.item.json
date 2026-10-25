@@ -1,7 +1,7 @@
 {
   "state": "Active",
   "created": "2026-10-08T00:06:41Z",
-  "updated": "2026-10-09T18:53:12Z",
+  "updated": "2026-10-25T17:40:22Z",
   "history": [
     {
       "state": "InActive",
@@ -13,7 +13,7 @@
     }
   ],
   "tag": "pcr",
-  "source": "../claude_code_rules/Python_Coding_Rules.md",
+  "source": "rule_sources/Python_Coding_Rules.md",
   "sha256": "960d77a2293078f55bdc4297f56dcf7dd2d5dc73e72d2c67eb963cbd5b4098bb",
-  "refreshed": "2026-10-10T14:36:33Z"
+  "refreshed": "2026-10-25T17:40:22Z"
 }

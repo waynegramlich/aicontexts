@@ -14,5 +14,8 @@ The version control rules are:
   modifies the commit log (e.g. `merge`, `rebase`, `reset`, `revert`,
   `cherry-pick`, `pull`, `push`).
 * Claude does an `hg` checkpoint before any `git` command that changes
-  state (e.g. `add`, `mv`, `rm`, `restore`, `stash`).
+  state (e.g. `add`, `mv`, `rm`, `restore`, `stash`).  This includes
+  a `stash` that is popped straight back, such as one used to see how
+  the committed files behave; for that, prefer the read-only `git show
+  HEAD:FILE`, or `git worktree` in a scratch directory.
 * Read-only `git` commands (e.g. `status`, `diff`, `log`) are free.
