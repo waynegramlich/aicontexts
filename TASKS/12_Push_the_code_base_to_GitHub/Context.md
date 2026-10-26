@@ -169,3 +169,4 @@
   type says so and how to change the type (`other_type_error()`).
   `README.md` and `REFERENCE.md` drop the `r type rules` step.  601
   checks.  Rehearsed the README steps in a scratch `solidcraftcnc`.
+* check.yml 40244792000 (9f69293): 16/21; Windows 561 checks, 2 failures: `copy` printed `..\none`.  Typed paths in `copy`, `expand_files()`, `source_name_error()` and `set_source()` now use `as_posix()`.

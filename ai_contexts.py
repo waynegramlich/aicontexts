@@ -1173,7 +1173,7 @@ def expand_files(arguments: list[str]) -> list[Path] | str:
     path: Path
     for path in files:
         if not path.is_file():
-            return f"'{path}' is not a file"
+            return f"'{path.as_posix()}' is not a file"
     return files
 
 
@@ -1337,11 +1337,12 @@ def source_name_error(path: Path) -> str:
         return f"A source can not be named '{path.name}'"
     if path.suffix != ".md" or path.stem == "":
         return (
-            f"'{path}' can not be a rule, since its name does not end in .md"
+            f"'{path.as_posix()}' can not be a rule, since its name does not "
+            "end in .md"
         )
     if path.name.casefold() in CLAUDE_NAMES:
         return (
-            f"'{path}' can not be a rule, since Claude Code loads "
+            f"'{path.as_posix()}' can not be a rule, since Claude Code loads "
             f"{path.name} files by itself"
         )
     return ""
@@ -3936,7 +3937,7 @@ class Items:
             return selected
         item: Item = selected[0]
         if not path.is_file():
-            return f"'{path}' is not a file"
+            return f"'{path.as_posix()}' is not a file"
 
         # Keep the source relative to the root, with real directories.
         source: str = (
@@ -4135,10 +4136,10 @@ class Items:
             return "Usage: ai_contexts COLLECTION copy DIRECTORY [CHOICES...]"
         directory: Path = Path(arguments[0])
         if not directory.is_dir():
-            return f"'{directory}' is not a directory"
+            return f"'{directory.as_posix()}' is not a directory"
         offered: list[tuple[str, Path]] = offered_rules(directory)
         if not offered:
-            return f"'{directory}' has no rules to copy"
+            return f"'{directory.as_posix()}' has no rules to copy"
 
         # Note the sources and texts of the rules already here.
         sources: set[Path] = set()

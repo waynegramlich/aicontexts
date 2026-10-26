@@ -238,7 +238,7 @@ aic r copy ../other_project/RULES
 A collection named `RULES` is a rules collection from the start.  (A
 rules collection with another name is made with `aic NAME create`, and
 then `aic n type rules` while it is still empty.)
-
+x
 `aic r copy` lists the other project's rules by number and title, and
 asks which to copy:
 
