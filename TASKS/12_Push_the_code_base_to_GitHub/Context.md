@@ -175,3 +175,21 @@
   went into `R.gwr` ("What the Other Systems Find").
 * Next: PyPI pending publishers (the user, on the web), then the
   user's go for a testpypi `release.yml` run, then for pypi.
+
+## Paused (2026-10-25, end of session)
+
+* The user committed the `R.gwr` "What the Other Systems Find" notes as
+  `638a43e` (its push is the user's, before `/clear`).
+* Nothing has been uploaded anywhere.  To resume, in order:
+  1. The user adds the two PyPI pending publishers (project
+     `aicontexts`, owner `waynegramlich`, repository `aicontexts`,
+     workflow `release.yml`, environment `testpypi` on test.pypi.org
+     and `pypi` on pypi.org), only once `aicontexts`/`solidcraft` have
+     settled (the user's #4).
+  2. On the user's explicit go: `gh workflow run release.yml -f
+     target=testpypi`, approve it (`R.gwr` "Approving a Deployment"),
+     watch it and its `check` job; record the run id here.
+  3. On a separate go: tag `v0.1.0` (the user), `gh workflow run
+     release.yml --ref v0.1.0 -f target=pypi`, then `./release_check.py
+     pypi 0.1.0` locally.
+* The user was still trying the README steps in `../solidcraftcnc`.
