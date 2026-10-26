@@ -193,3 +193,20 @@
      release.yml --ref v0.1.0 -f target=pypi`, then `./release_check.py
      pypi 0.1.0` locally.
 * The user was still trying the README steps in `../solidcraftcnc`.
+
+## Ready to rehearse (2026-10-26)
+
+* The user approved `LICENSE` (MIT-0) and pushed `e5e2541`; git clean,
+  `git ls-remote github main` matches.  Code unchanged since the green
+  check.yml 40248621774 (8fb08f1; only `rule_sources/` differ).  All
+  four checkers clean, 601 checks.  Next: pending publishers (the
+  user), then the testpypi go.
+* release.yml 40391568647 (`testpypi`, e5e2541): build, publish,
+  listed, check 20/20 (lint skipped for a version) all passed;
+  test.pypi.org has `0.1.0.dev202610261959`.  `./release_check.py
+  testpypi 0.1.0.dev202610261959` passed locally.  Next: pypi.org
+  pending publisher (the user), tag `v0.1.0`, the user's go for pypi.
+* The user: Claude may run every `git` command except `git commit`
+  (`R.vcr` source updated).  pypi.org pending publisher added (the
+  user).  Claude tagged `v0.1.0` (annotated, 7433c92) on e5e2541 and
+  pushed it; `git ls-remote` confirms.  Next: the user's go for pypi.
