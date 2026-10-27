@@ -214,8 +214,8 @@ issues by priority first.
 * A tag can stand in for its collection: `aic I.dbzib close` is the same
   as `aic ISSUES close I.dbzib`.
 * `aic T.wr show` shows everything about a task.
-* `aic` with no arguments lists the collections, and `aic -h` lists all
-  of the commands.
+* `aic` with no arguments lists the collections, `aic -h` lists all
+  of the commands, and `aic --version` prints the version.
 * Every command checks the collections and tells you about anything that
   needs fixing (such as a title edited by hand), and how to fix it.
 

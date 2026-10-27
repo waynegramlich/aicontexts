@@ -1,5 +1,4 @@
-@12_Push_the_code_base_to_GitHub/Details.md
-@12_Push_the_code_base_to_GitHub/Context.md
+@12_Push_the_code_base_to_GitHub/Summary.md
 @../ISSUES/4_Warn_about_project_files_used_as_rules/Summary.md
 @10.4_Block_comment_the_test_suite/Summary.md
 @../ISSUES/2_Limit_directory_searches_in_large_trees/Summary.md

@@ -210,3 +210,9 @@
   (`R.vcr` source updated).  pypi.org pending publisher added (the
   user).  Claude tagged `v0.1.0` (annotated, 7433c92) on e5e2541 and
   pushed it; `git ls-remote` confirms.  Next: the user's go for pypi.
+
+## Released (2026-10-26)
+
+* release.yml 40399623382 (`pypi`, v0.1.0 = e5e2541): build, publish,
+  listed, check 20/20 passed.  pypi.org has `aicontexts` 0.1.0 (wheel
+  and sdist).  `./release_check.py pypi 0.1.0` passed locally.

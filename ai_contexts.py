@@ -39,6 +39,7 @@ HELP: str = """Usage: ai_contexts COLLECTION COMMAND [ARGUMENTS...]
                                collection if NAME is RULES, in any case)
        ai_contexts --test      Run the self tests in a temporary directory
        ai_contexts -h | --help Print this help message
+       ai_contexts --version   Print the version (e.g. aicontexts 0.1.0)
        ai_contexts             List the collections, one line each
 
 A COLLECTION is a directory containing a `.ai_contexts.json` file.  They
@@ -5100,11 +5101,14 @@ class Items:
         Returns:
         * (`int`): 0 for success and 1 for failure.
         """
-        # Handle no arguments, the help and the tests.
+        # Handle no arguments, the help, the version and the tests.
         if not arguments:
             return Items.list_collections()
         if arguments[0] in ("-h", "--help"):
             print(HELP)
+            return 0
+        if arguments == ["--version"]:
+            print(f"aicontexts {__version__}")
             return 0
         if arguments == ["--test"]:  # pragma: no cover
             # The tests are in `ai_contexts_test.py`, next to this file

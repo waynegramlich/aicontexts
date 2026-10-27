@@ -126,8 +126,9 @@ longer matches the directory name, two Items with the same tag), saying
 how to fix it.
 
 Run `ai_contexts` with no arguments to list the collections, one line
-each, and `ai_contexts -h` to list the commands.  `ai_contexts t ls -l`
-also lists the created and updated times in the local time zone.
+each, `ai_contexts -h` to list the commands, and `ai_contexts --version`
+to print the version.  `ai_contexts t ls -l` also lists the created and
+updated times in the local time zone.
 
 Every run also writes `AI_Contexts_Rules.md`, the rules for using
 `ai_contexts` that the AI loads, into every collection.  Its text is

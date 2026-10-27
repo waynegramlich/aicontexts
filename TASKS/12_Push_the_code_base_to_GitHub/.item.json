@@ -1,7 +1,7 @@
 {
-  "state": "Open",
+  "state": "Closed",
   "created": "2026-10-25T18:02:18Z",
-  "updated": "2026-10-25T18:02:28Z",
+  "updated": "2026-10-26T21:02:54Z",
   "history": [
     {
       "state": "Pending",
@@ -10,6 +10,10 @@
     {
       "state": "Open",
       "time": "2026-10-25T18:02:28Z"
+    },
+    {
+      "state": "Closed",
+      "time": "2026-10-26T21:02:54Z"
     }
   ],
   "tag": "pcbtg"
