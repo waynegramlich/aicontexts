@@ -14,7 +14,7 @@
   ],
   "tag": "vcr",
   "source": "rule_sources/Version_Control_Rules.md",
-  "sha256": "9aad6f4ce4ac7be633ccba2e943b5a07074847e8a3e529cf7e92581f375dc39e",
-  "refreshed": "2026-10-26T20:50:07Z",
+  "sha256": "fdb7fb3aecefbbe91f2c807a79747cc725b467258717ac26c9997ab93bd34743",
+  "refreshed": "2026-10-30T15:27:23Z",
   "title": "Version Control Rules"
 }
