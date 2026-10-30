@@ -54,6 +54,11 @@ The version control rules are:
   a `stash` that is popped straight back, such as one used to see how
   the committed files behave; for that, prefer the read-only `git show
   HEAD:FILE`, or `git worktree` in a scratch directory.
-* When the User says they are getting ready to do a commit, Claude does
-  an `hg` checkpoint, runs `git add -A` in the directory that contains
-  `.git/`, and suggests a commit message.
+* When the User says they are getting ready to do a commit (e.g. by
+  mentioning `git commit`), Claude does these in order:
+  1. If the project has any Open `ai_contexts` items, Claude brings the
+     `Context.md` of each one up to date, so that the next session can
+     pick up the work.
+  2. Does an `hg` checkpoint.
+  3. Runs `git add -A` in the directory that contains `.git/`.
+  4. Suggests a commit message.
