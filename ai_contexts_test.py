@@ -45,6 +45,7 @@ from ai_contexts import (
     find_collections,
     has_summary,
     is_rule_copy,
+    kilobytes_text,
     local_time,
     matches,
     new_metadata,
@@ -58,6 +59,7 @@ from ai_contexts import (
     remove_file,
     rule_title,
     sha256_of,
+    size_text,
     source_name_error,
     tag_prefix,
     tag_references,
@@ -132,6 +134,8 @@ def test() -> int:
         _test_rules(check, Path(temporary))
     with tempfile.TemporaryDirectory() as temporary:
         _test_rule_doubts(check, Path(temporary))
+    with tempfile.TemporaryDirectory() as temporary:
+        _test_list_sizes(check, Path(temporary))
     with tempfile.TemporaryDirectory() as temporary:
         _test_transfer(check, Path(temporary))
     with tempfile.TemporaryDirectory() as temporary:
@@ -253,6 +257,68 @@ def _test_parsing(check: Check) -> None:
         "1.2  Reference  -  I.x    X\n",
         "print_items shows the tag, and the priority if asked",
     )
+
+    # Check printing sizes, which line up on the right before the title.
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        print_items(printed, [1234, 5])
+    check(
+        output.getvalue() == "1    Pending    cde  1.23 KB  Can Dogs Eat\n"
+        "1.2  Reference  x        5 B  X\n",
+        "print_items shows the sizes",
+    )
+
+    # Check that the total lines up with the sizes, past any priority,
+    # and that a wider total moves them over.
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        print_items(printed, [1234, 5], total=True)
+        print_items(printed, [5, 5], priority=True, total=True)
+        print_items(printed[:1], [123456], total=True)
+    check(
+        output.getvalue() == "1    Pending    cde  1.23 KB  Can Dogs Eat\n"
+        "1.2  Reference  x        5 B  X\n"
+        "                     1.24 KB  Total\n"
+        "1    Pending    0  cde      5 B  Can Dogs Eat\n"
+        "1.2  Reference  -  x        5 B  X\n"
+        "                        0.01 KB  Total\n"
+        "1  Pending    cde  123 KB  Can Dogs Eat\n"
+        "                   123 KB  Total\n",
+        "print_items lines the total up with the sizes",
+    )
+
+    # Check that a total is always in KB, even past 3 digits.
+    size: int
+    expected_size: str
+    for size, expected_size in (
+        (0, "0 KB"),
+        (500, "0.5 KB"),
+        (32149, "32.1 KB"),
+        (999499, "999 KB"),
+        (1234567, "1230 KB"),
+    ):
+        check(
+            kilobytes_text(size) == expected_size,
+            f"kilobytes_text({size}) is {expected_size}",
+        )
+
+    # Check that a size never has more than 3 digits.
+    for size, expected_size in (
+        (0, "0 B"),
+        (999, "999 B"),
+        (1000, "1 KB"),
+        (1234, "1.23 KB"),
+        (12345, "12.3 KB"),
+        (123456, "123 KB"),
+        (999499, "999 KB"),
+        (999500, "1 MB"),
+        (45600000, "45.6 MB"),
+        (2000000000, "2 GB"),
+    ):
+        check(
+            size_text(size) == expected_size,
+            f"size_text({size}) is {expected_size}",
+        )
 
     # Check making tag prefixes from collection names.
     collection_name: str
@@ -3094,6 +3160,114 @@ def _test_rule_failures(
         and read_item(rule)["title"] == "Alpha Rule",
         "a rule is upgraded once its title can be recorded",
     )
+
+
+# Function `_test_list_sizes()`:
+def _test_list_sizes(check: Check, directory: Path) -> None:
+    """Test the sizes that `list -l` and `list -o` print.
+
+    The sizes must be those of the files that are really imported.
+
+    Arguments:
+    * `check` (`Check`):
+      Records a check: a condition that should be true and its
+      description.
+    * `directory` (`Path`):
+      The directory to test in.
+    """
+    # Make a project with tasks in several states and a rule.
+    answers: list[str] = []
+    run: Callable[..., tuple[int, str]] = _runner(answers)
+    project: Path = directory / "project"
+    project.mkdir()
+    write_file(directory / "A_Rule.md", "# A Rule\n" + "r" * 2000)
+    write_file(directory / "B_Rule.md", "# B Rule\n")
+    original: Path = Path.cwd()
+    os.chdir(project)
+    tasks: Path = project / "TASKS"
+    try:
+        answers[:] = ["y", "y"]
+        run("TASKS", "create")
+        run("RULES", "create")
+        run("r", "create", "1", "../A_Rule.md", "../B_Rule.md")
+        run("r", "activate", "1")
+        run("t", "create", "1", "Open")
+        run("t", "create", "2", "Pending")
+        run("t", "create", "3", "Closed")
+        run("t", "create", "4", "Older")
+
+        # Give the files sizes that tell them apart.
+        write_file(tasks / "1_Open" / "Details.md", "# 1 Open\n" + "d" * 91)
+        write_file(tasks / "1_Open" / "Context.md", "c" * 400)
+        write_file(tasks / "2_Pending" / "Details.md", "# 2 Pending\n")
+        write_file(tasks / "2_Pending" / "Context.md", "c" * 9000)
+        pending_size: int = (tasks / "2_Pending" / "Details.md").stat().st_size
+        run("t", "open", "T.o")
+        run("t", "close", "T.o2")
+        run("t", "close", "T.c")
+        write_file(
+            tasks / "3_Closed" / "Summary.md",
+            "# Summary of `T.c` Closed\n\n" + "s" * 3000,
+        )
+        closed_size: int = (tasks / "3_Closed" / "Summary.md").stat().st_size
+
+        # Only the most recent Closed item keeps its summary.
+        code: int
+        text: str
+        with mock.patch.dict(os.environ, {SUMMARIES_VARIABLE: "1"}):
+            code, text = run("t", "ls", "-l")
+            check(
+                code == 0
+                and f"{size_text(500)}  Open\n" in text
+                and f"{size_text(pending_size)}  Pending\n" in text
+                and "Closed\n" not in text.replace("Closed or", ""),
+                "ls -l prints the Details.md and Context.md sizes",
+            )
+
+            # `-o` lists everything, largest first, and implies `-l`.
+            code, text = run("t", "ls", "-o")
+            lines: list[str] = text.splitlines()
+            check(
+                code == 0
+                and [line.split("  ")[-1] for line in lines]
+                == ["Closed", "Open", "Pending", "Older", "Total"]
+                and f"{size_text(closed_size)}  Closed" in lines[0]
+                and lines[3].endswith("0 B  Older")
+                and lines[4].endswith(
+                    f"{kilobytes_text(500 + pending_size + closed_size)}"
+                    "  Total"
+                ),
+                "ls -o lists everything by size, largest first, then a total",
+            )
+            code, long_text = run("t", "ls", "--ordered")
+            check(code == 0 and long_text == text, "--ordered is -o")
+            code, text = run("t", "ls", "-o", "1", "2")
+            check(code == 1 and "[-o]" in text, "ls -o takes one number")
+
+            # The sizes add up to what `Startup.md` imports.
+            imported: int = sum(
+                (tasks / line[1:]).stat().st_size
+                for line in read_file(tasks / "Startup.md").splitlines()
+                if line != "@Closed.md"
+            )
+            check(
+                imported == 500 + pending_size + closed_size,
+                "the sizes match the files Startup.md imports",
+            )
+
+        # An Active rule counts, through `Active_Rules.md`, and an
+        # InActive one does not.
+        code, text = run("r", "ls", "-o")
+        lines = text.splitlines()
+        check(
+            code == 0
+            and "2.01 KB  A Rule" in lines[0]
+            and lines[1].endswith("0 B  B Rule")
+            and lines[2].endswith("2.01 KB  Total"),
+            "ls -o counts only the Active rules",
+        )
+    finally:
+        os.chdir(original)
 
 
 # Function `_test_rule_doubts()`:

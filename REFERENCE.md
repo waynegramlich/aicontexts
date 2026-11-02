@@ -127,8 +127,12 @@ how to fix it.
 
 Run `ai_contexts` with no arguments to list the collections, one line
 each, `ai_contexts -h` to list the commands, and `ai_contexts --version`
-to print the version.  `ai_contexts t ls -l` also lists the created and
-updated times in the local time zone.
+to print the version.  `ai_contexts t ls -l` also lists the size of what
+each Item has loaded at startup: the files that `Startup.md` and
+`Active_Rules.md` import for it, added up, to at most 3 digits, where a
+`KB` is 1000 bytes.  (An Item with none loaded shows `0 B`.)  `ai_contexts
+t ls -o` lists every Item, Closed and Rejected ones too, with its size,
+largest first, and ends with a line that has their total in KB.
 
 Every run also writes `AI_Contexts_Rules.md`, the rules for using
 `ai_contexts` that the AI loads, into every collection.  Its text is

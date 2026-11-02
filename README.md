@@ -214,6 +214,10 @@ issues by priority first.
 * A tag can stand in for its collection: `aic I.dbzib close` is the same
   as `aic ISSUES close I.dbzib`.
 * `aic T.wr show` shows everything about a task.
+* `aic t ls -l` also lists how much each task loads at the start of a
+  session (e.g. `4.2 KB`), and `aic t ls -o` lists every task, closed
+  ones too, largest first, with their total on the last line, which
+  shows what is using up the context.
 * `aic` with no arguments lists the collections, `aic -h` lists all
   of the commands, and `aic --version` prints the version.
 * Every command checks the collections and tells you about anything that
@@ -238,7 +242,7 @@ aic r copy ../other_project/RULES
 A collection named `RULES` is a rules collection from the start.  (A
 rules collection with another name is made with `aic NAME create`, and
 then `aic n type rules` while it is still empty.)
-x
+
 `aic r copy` lists the other project's rules by number and title, and
 asks which to copy:
 

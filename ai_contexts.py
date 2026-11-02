@@ -70,10 +70,12 @@ Commands:
   delete [-r] NUMBER      Delete an item and all of its files; with -r,
                           after asking, its children too.  NUMBER may be
                           a range of siblings, like 1.2.5-6
-  list [-a] [-l] [NUMBER] List the items, or NUMBER and its children,
+  list [-a] [-l] [-o] [NUMBER]
+                          List the items, or NUMBER and its children,
                           except Closed ones (unless named, or -a)
   show NUMBER             Show everything about an item
-  ls [-a] [-l] [NUMBER]   Same as list
+  ls [-a] [-l] [-o] [NUMBER]
+                          Same as list
   pending [-r] NUMBER     Set the item state to Pending (for this and the
                           other state commands, NUMBER may be a range of
                           siblings, like 1.2.5-6)
@@ -106,7 +108,10 @@ Commands:
 Options:
   -r, --recursive         Also apply to all of the child items
   -a, --all               Also list the Closed and Rejected items
-  -l, --long              Also list the created and updated times
+  -l, --long              Also list the size of the .md files that
+                          each item has loaded at startup
+  -o, --ordered           Same as -a -l, with the largest sizes first
+                          and a last line with their total in KB
 
 Items are numbered without gaps: if 1.3 exists, so do 1.1 and 1.2.  A
 PLACE is one of:
@@ -2092,21 +2097,30 @@ class Items:
     def show(
         self,
         items: list[Item],
-        long: bool = False,
+        sizes: list[int] | None = None,
         old_numbers: list[str] | None = None,
+        *,
+        total: bool = False,
     ) -> None:
         """Print items with this collection's tag prefix and priority.
 
         Arguments:
         * `items` (`list[Item]`):
           The items to print.
-        * `long` (`bool`):
-          True to also print the created and updated times.
+        * `sizes` (`list[int] | None`):
+          If given, the bytes each item has loaded at startup.
         * `old_numbers` (`list[str] | None`):
           If given, the old number of each item, which is printed first.
+        * `total` (`bool`):
+          True to end with a line that has the total of the `sizes`.
         """
         print_items(
-            items, long, self.priority_enabled, self.prefix, old_numbers
+            items,
+            sizes,
+            self.priority_enabled,
+            self.prefix,
+            old_numbers,
+            total=total,
         )
 
     # Method `Items.priority_enabled()`:
@@ -2159,6 +2173,24 @@ class Items:
         * (`Path`): The path of the copy.
         """
         return self.directories[item.name] / "Details.md"
+
+    # Method `Items.active_copies()`:
+    def active_copies(self) -> list[Path]:
+        """Return the files that `Active_Rules.md` imports, in order.
+
+        Returns:
+        * (`list[Path]`): The existing copy of each Active rule's
+          source; empty for a collection without sources.
+        """
+        if not self.collection_type.has_sources:
+            return []
+        return [
+            self.copy_path(item)
+            for item in self.list_items()
+            if item.state == "Active"
+            and item.source
+            and self.copy_path(item).is_file()
+        ]
 
     # Method `Items.upgrade_rule()`:
     def upgrade_rule(self, item: Item) -> None:
@@ -4645,15 +4677,22 @@ class Items:
             self.show(list(renumbered.values()), old_numbers=list(renumbered))
 
     # Method `Items.list_command()`:
-    def list_command(self, arguments: list[str]) -> str:
-        """Run `list [-a] [-l] [NUMBER]`.
+    def list_command(
+        self, arguments: list[str], collections: list["Items"]
+    ) -> str:
+        """Run `list [-a] [-l] [-o] [NUMBER]`.
 
         Closed and Rejected items are left out, unless `-a` is given or
-        it is the item NUMBER itself, and a note says how many.
+        it is the item NUMBER itself, and a note says how many.  `-l`
+        adds the size of what each item has loaded at startup, and `-o`
+        means `-a -l` with the largest sizes first and a last line with
+        their total in KB.
 
         Arguments:
         * `arguments` (`list[str]`):
           The command's arguments.
+        * `collections` (`list[Items]`):
+          Every collection, which decides what is loaded at startup.
 
         Returns:
         * (`str`): An empty string on success, or an error string on
@@ -4662,6 +4701,7 @@ class Items:
         # Separate the options from the number.
         long: bool = False
         everything: bool = False
+        ordered: bool = False
         numbers: list[str] = []
         argument: str
         for argument in arguments:
@@ -4669,12 +4709,14 @@ class Items:
                 long = True
             elif argument in ("-a", "--all"):
                 everything = True
+            elif argument in ("-o", "--ordered"):
+                ordered = True
             else:
                 numbers.append(argument)
 
         # There may be at most one number or tag.
         if len(numbers) > 1:
-            return "Usage: ai_contexts COLLECTION list [-a] [-l] [NUMBER]"
+            return "Usage: ai_contexts COLLECTION list [-a] [-l] [-o] [NUMBER]"
         name: tuple[int, ...] | str = (
             self.resolve(numbers[0]) if numbers else ()
         )
@@ -4684,7 +4726,7 @@ class Items:
         # Leave out finished items, unless asked for, and count them.
         listed: list[Item] = self.list_items(name)
         hidden: int = 0
-        if not everything:
+        if not (everything or ordered):
             shown: list[Item] = [
                 item
                 for item in listed
@@ -4704,8 +4746,29 @@ class Items:
                 )
             )
 
+        # Find the sizes, and list by size if asked to.
+        sizes: list[int] | None = None
+        if long or ordered:
+            loaded: dict[Path, int] = startup_sizes(
+                [
+                    collection
+                    for collection in collections
+                    if not collection.error
+                ]
+            )
+            if ordered:
+                listed.sort(
+                    key=lambda item: (
+                        -loaded.get(self.directories[item.name], 0),
+                        item.name,
+                    )
+                )
+            sizes = [
+                loaded.get(self.directories[item.name], 0) for item in listed
+            ]
+
         # Print the items and how many were left out.
-        self.show(listed, long)
+        self.show(listed, sizes, total=ordered)
         if hidden:
             print(
                 f"({hidden} Closed or Rejected item"
@@ -5001,7 +5064,8 @@ class Items:
             print("Not created", file=sys.stderr)
             return 1
 
-        # Create it; one named RULES (in any case) is a rules collection.
+        # Create it; one named RULES (in any case) is a rules
+        # collection.
         created: Items = Items(path)
         if created.error:
             return 1
@@ -5205,7 +5269,7 @@ class Items:
             case "create":
                 error = items.create_command(rest, ask)
             case "list":
-                error = items.list_command(rest)
+                error = items.list_command(rest, collections)
             case "rename":
                 error = items.rename_command(rest, ask)
             case "delete":
@@ -5254,6 +5318,133 @@ class Items:
         return 0
 
 
+# Function `startup_collection()`:
+def startup_collection(collections: list["Items"]) -> "Items | None":
+    """Return the TASKS collection, which holds `Startup.md`.
+
+    Arguments:
+    * `collections` (`list[Items]`):
+      Every collection.
+
+    Returns:
+    * (`Items | None`): The TASKS collection, or `None` without one.
+    """
+    return next(
+        (
+            collection
+            for collection in collections
+            if collection.items_directory.name == STARTUP_COLLECTION
+        ),
+        None,
+    )
+
+
+# Function `startup_files()`:
+def startup_files(
+    startup: "Items", collections: list["Items"]
+) -> tuple[list[Path], list[tuple[str, str]]]:
+    """Find the files that `Startup.md` imports, in order.
+
+    See `write_startup()` for which files they are.
+
+    Arguments:
+    * `startup` (`Items`):
+      The TASKS collection.
+    * `collections` (`list[Items]`):
+      Every collection.
+
+    Returns:
+    * (`tuple[list[Path], list[tuple[str, str]]]`): The files, and the
+      tag and title of each older Closed item for `Closed.md`.
+    """
+    # Go through every item, the TASKS items first.
+    files: list[Path] = []
+    closed: list[tuple[str, str, str, Path]] = []
+    collection: Items
+    for collection in [startup] + [
+        collection for collection in collections if collection is not startup
+    ]:
+        collection_type: CollectionType = collection.collection_type
+        if not collection_type.in_startup:
+            continue
+        item: Item
+        for item in collection.list_items():
+            item_directory: Path = collection.directories[item.name]
+
+            # Note a finished item for later.
+            if item.state in collection_type.finished_states:
+                closed.append(
+                    (
+                        closed_time(item, item_directory),
+                        f"{collection.prefix}{item.tag}",
+                        item.title,
+                        item_directory,
+                    )
+                )
+                continue
+
+            # Import the `Details.md` and maybe the `Context.md` of
+            # others.
+            file_names: tuple[str, ...] = ("Details.md",)
+            if item.state in collection_type.context_states:
+                file_names += ("Context.md",)
+            file_name: str
+            for file_name in file_names:
+                if (item_directory / file_name).is_file():
+                    files.append(item_directory / file_name)
+
+    # Get the number of summaries, which the test suite can change.
+    limit: int = CLOSED_SUMMARIES
+    with contextlib.suppress(ValueError):
+        limit = int(os.environ.get(SUMMARIES_VARIABLE, limit))
+
+    # Import the summaries of the most recently finished items.
+    closed.sort(key=lambda entry: entry[0], reverse=True)
+    for _, _, _, item_directory in closed[:limit]:
+        summary_file: str = (
+            "Summary.md" if has_summary(item_directory) else "Details.md"
+        )
+        files.append(item_directory / summary_file)
+
+    # The older ones go in `Closed.md`.
+    return files, [(tag, title) for _, tag, title, _ in closed[limit:]]
+
+
+# Function `startup_sizes()`:
+def startup_sizes(collections: list["Items"]) -> dict[Path, int]:
+    """Find how many bytes each item has loaded at startup.
+
+    These are the files imported by `Startup.md` and by each
+    `Active_Rules.md`, as of now.
+
+    Arguments:
+    * `collections` (`list[Items]`):
+      Every collection.
+
+    Returns:
+    * (`dict[Path, int]`): The total size of the imported files of each
+      item directory; an item with none is left out.
+    """
+    # Collect the files that are imported.
+    startup: Items | None = startup_collection(collections)
+    files: list[Path] = (
+        startup_files(startup, collections)[0] if startup else []
+    )
+    collection: Items
+    for collection in collections:
+        files += collection.active_copies()
+
+    # Add up their sizes by item directory.
+    sizes: dict[Path, int] = {}
+    path: Path
+    for path in files:
+        if path.is_file():
+            sizes[path.parent] = (
+                sizes.get(path.parent, 0) + path.stat().st_size
+            )
+    return sizes
+
+
 # Function `write_startup()`:
 def write_startup(collections: list["Items"]) -> str:
     """Write `Startup.md` (and `Closed.md`) into the TASKS collection.
@@ -5278,74 +5469,17 @@ def write_startup(collections: list["Items"]) -> str:
       failure.
     """
     # Nothing is written without a TASKS collection.
-    startup: Items | None = next(
-        (
-            collection
-            for collection in collections
-            if collection.items_directory.name == STARTUP_COLLECTION
-        ),
-        None,
-    )
+    startup: Items | None = startup_collection(collections)
     if startup is None:
         return ""
 
-    # Go through every item, the TASKS items first.
-    lines: list[str] = []
-    closed: list[tuple[str, str, str, Path, str]] = []
-    collection: Items
-    for collection in [startup] + [
-        collection for collection in collections if collection is not startup
-    ]:
-        collection_type: CollectionType = collection.collection_type
-        if not collection_type.in_startup:
-            continue
-        item: Item
-        for item in collection.list_items():
-            # Find the item's directory relative to TASKS.
-            item_directory: Path = collection.directories[item.name]
-            relative: str = Path(
-                os.path.relpath(item_directory, startup.items_directory)
-            ).as_posix()
-
-            # Note a finished item for later.
-            if item.state in collection_type.finished_states:
-                closed.append(
-                    (
-                        closed_time(item, item_directory),
-                        f"{collection.prefix}{item.tag}",
-                        item.title,
-                        item_directory,
-                        relative,
-                    )
-                )
-                continue
-
-            # Import the `Details.md` and maybe the `Context.md` of
-            # others.
-            file_names: tuple[str, ...] = ("Details.md",)
-            if item.state in collection_type.context_states:
-                file_names += ("Context.md",)
-            file_name: str
-            for file_name in file_names:
-                if (item_directory / file_name).is_file():
-                    lines.append(f"@{relative}/{file_name}")
-
-    # Get the number of summaries, which the test suite can change.
-    limit: int = CLOSED_SUMMARIES
-    with contextlib.suppress(ValueError):
-        limit = int(os.environ.get(SUMMARIES_VARIABLE, limit))
-
-    # Import the summaries of the most recently finished items.
-    closed.sort(key=lambda entry: entry[0], reverse=True)
-    for _, _, _, item_directory, relative in closed[:limit]:
-        summary_file: str = (
-            "Summary.md" if has_summary(item_directory) else "Details.md"
-        )
-        lines.append(f"@{relative}/{summary_file}")
-
-    # The older ones go in `Closed.md`.
-    older: list[tuple[str, str]] = [
-        (tag, title) for _, tag, title, _, _ in closed[limit:]
+    # Make each file relative to TASKS, and note any `Closed.md`.
+    files: list[Path]
+    older: list[tuple[str, str]]
+    files, older = startup_files(startup, collections)
+    lines: list[str] = [
+        "@" + Path(os.path.relpath(path, startup.items_directory)).as_posix()
+        for path in files
     ]
     if older:
         lines.append("@Closed.md")
@@ -5727,12 +5861,8 @@ def write_active_rules(collections: list["Items"]) -> str:
 
         # Import the copy of each Active rule's source.
         lines: list[str] = [
-            f"@{collection.directories[item.name].name}/"
-            f"{collection.copy_path(item).name}\n"
-            for item in collection.list_items()
-            if item.state == "Active"
-            and item.source
-            and collection.copy_path(item).is_file()
+            f"@{path.parent.name}/{path.name}\n"
+            for path in collection.active_copies()
         ]
 
         # Write the imports.
@@ -5881,22 +6011,63 @@ def write_closed(closed_path: Path, older: list[tuple[str, str]]) -> str:
     return ""
 
 
+# Function `size_text()`:
+def size_text(size: int) -> str:
+    """Return a size in bytes as at most 3 digits and a unit.
+
+    A kilobyte is 1000 bytes, so that the digits never run to 4.
+
+    Arguments:
+    * `size` (`int`):
+      The size in bytes.
+
+    Returns:
+    * (`str`): The size (e.g. `"512 B"`, `"1.23 KB"` or `"45.6 MB"`).
+    """
+    # Move up a unit until it rounds to fewer than 4 digits.
+    value: float = float(size)
+    unit: str = "B"
+    larger: str
+    for larger in ("KB", "MB", "GB"):
+        if float(f"{value:.3g}") < 1000.0:
+            break
+        value /= 1000.0
+        unit = larger
+    return f"{value:.3g} {unit}"
+
+
+# Function `kilobytes_text()`:
+def kilobytes_text(size: int) -> str:
+    """Return a size in bytes as kilobytes, to 3 significant digits.
+
+    Arguments:
+    * `size` (`int`):
+      The size in bytes.
+
+    Returns:
+    * (`str`): The size (e.g. `"0.5 KB"`, `"32.1 KB"` or `"1230 KB"`).
+    """
+    return f"{float(f'{size / 1000.0:.3g}'):.10g} KB"
+
+
 # Function `print_items()`:
 def print_items(
     items: list[Item],
-    long: bool = False,
+    sizes: list[int] | None = None,
     priority: bool = False,
     prefix: str = "",
     old_numbers: list[str] | None = None,
+    *,
+    total: bool = False,
 ) -> None:
     """Print one line per item: number, state, priority, tag and title.
 
     Arguments:
     * `items` (`list[Item]`):
       The items to print.
-    * `long` (`bool`):
-      True to also print the created and updated times, in the local
-      time zone.
+    * `sizes` (`list[int] | None`):
+      If given, the bytes each item has loaded at startup, printed
+      before its title.
     * `priority` (`bool`):
       True to print the priority, with "-" for none.
     * `prefix` (`str`):
@@ -5904,6 +6075,9 @@ def print_items(
     * `old_numbers` (`list[str] | None`):
       If given, the old number of each item, which starts its line with
       "->".
+    * `total` (`bool`):
+      True to end with a line that has the total of the `sizes` in KB,
+      in the column of the sizes.
     """
     # Find the width of each column.
     old_width: int = max((len(old) for old in old_numbers or []), default=0)
@@ -5913,7 +6087,11 @@ def print_items(
     }
     tag_width: int = max((len(tag) for tag in tags.values()), default=0)
     state_width: int = max(len(state) for state in ALL_STATES)
-    time_width: int = len("YYYY-MM-DD HH:MM")
+    size_texts: list[str] = [size_text(size) for size in sizes or []]
+    total_text: str = kilobytes_text(sum(sizes or [])) if total else ""
+    size_width: int = max(
+        (len(text) for text in [*size_texts, total_text]), default=0
+    )
 
     # Print a line for each item.
     index: int
@@ -5924,17 +6102,20 @@ def print_items(
             if priority
             else ""
         )
-        times: str = (
-            f"{local_time(item.created):<{time_width}}  "
-            f"{local_time(item.updated):<{time_width}}  "
-            if long
-            else ""
-        )
+        size: str = f"{size_texts[index]:>{size_width}}  " if sizes else ""
         print(
             (f"{old_numbers[index]:<{old_width}} -> " if old_numbers else "")
             + f"{item.number:<{width}}  "
             f"{item.state:<{state_width}}  "
-            f"{levels}{tags[item.name]:<{tag_width}}  {times}{item.title}"
+            f"{levels}{tags[item.name]:<{tag_width}}  {size}{item.title}"
+        )
+
+    # Print the total under the sizes, past the columns before them.
+    if total:
+        indent: int = width + state_width + tag_width + 6
+        print(
+            f"{'':<{indent + (3 if priority else 0)}}"
+            f"{total_text:>{size_width}}  Total"
         )
 
 
