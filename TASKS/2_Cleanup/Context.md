@@ -60,7 +60,6 @@ NUMBER`).  `CONTEXT_STATES = ("Open", "Reference")` decides which
 ```sh
 python3 tracker.py --test      # 121 checks at end of task 2
 ruff check --config ../claude_notes/ruff.toml tracker.py
-flake8 --config ../claude_notes/.flake8 tracker.py
 mypy --strict tracker.py
 ```
 

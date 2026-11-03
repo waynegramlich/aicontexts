@@ -150,8 +150,11 @@ At AI startup, the AI is directed to read at most 2 of the 3 files
 above:
 
 * **`Details.md`**: This is read until the Task/Issue is closed.
-* **`Context.md`**: This is read while the Task/Issue is open.
-* **`Summary.md`**: This is read once the Task/Issue is closed.
+* **`Context.md`**: This is read while the Task/Issue is Open or
+  Reference.
+* **`Summary.md`**: This is read once the Task/Issue is closed.  A
+  closed sub-task's summary is only read while its parent is in the
+  Reference state; otherwise the parent speaks for its sub-tasks.
 
 Thus, the AI gets the context it needs to focus on individual Tasks
 and/or Issues.
@@ -178,7 +181,8 @@ A task (or issue) is always in one of these states:
 * **Reference:** Not being worked on, but its `Context.md` is still
   loaded, so its notes stay available.
 * **Suspended:** Put aside for now.
-* **Closed:** Done.  Only its `Summary.md` is loaded.
+* **Closed:** Done.  Only its `Summary.md` is loaded, and for a
+  sub-task, only while its parent is Reference.
 * **Rejected:** Decided against.  It is treated like a Closed one.
 
 The commands are named after the states (`pending`, `open`, `reference`,
@@ -215,9 +219,11 @@ issues by priority first.
   as `aic ISSUES close I.dbzib`.
 * `aic T.wr show` shows everything about a task.
 * `aic t ls -l` also lists how much each task loads at the start of a
-  session (e.g. `4.2 KB`), and `aic t ls -o` lists every task, closed
-  ones too, largest first, with their total on the last line, which
-  shows what is using up the context.
+  session (e.g. `4.2 KB`), and `aic t ls -l -a` includes the closed
+  ones, so you can see exactly what is using up the context.  (A
+  closed sub-task shows `0 B` unless its task is Reference: the task's
+  summary speaks for it.)  `aic t ls -o` lists them largest first,
+  with their total on the last line.
 * `aic` with no arguments lists the collections, `aic -h` lists all
   of the commands, and `aic --version` prints the version.
 * Every command checks the collections and tells you about anything that
@@ -294,18 +300,21 @@ it:
    pipx install aicontexts
    ```
 
-   Or, without either, copy `ai_contexts.py` into a directory on your
-   `PATH`, and make a symbolic link to it named `aic`:
+   Or, to run a copy of `ai_contexts.py` that you keep yourself (such
+   as a clone of its repository), install it in editable mode, which
+   works the same on Linux, macOS and Windows:
 
    ```
-   cp ai_contexts.py ~/bin/
-   ln -s ai_contexts.py ~/bin/aic
+   uv tool install --editable ~/src/aicontexts
    ```
+
+   Both commands then run that copy, so a change to it (or a `git
+   pull`) takes effect at once in every project.  Without `uv`, on
+   Linux or macOS, a symbolic link in a directory on your `PATH` does
+   the same: `ln -s ~/src/aicontexts/ai_contexts.py ~/.local/bin/aic`.
 
 2. Check it with `aic --test`, which runs its tests in a temporary
    directory.
 
 3. Create the collections and set up `CLAUDE.md` as described in
    "Getting Started".
-
-`REFERENCE.md` has the details of how `ai_contexts` works.

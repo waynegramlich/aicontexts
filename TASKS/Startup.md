@@ -1,13 +1,11 @@
+<!-- Written by ai_contexts; do not edit. -->
+@13_Shrink_the_startup_context/Summary.md
 @12_Push_the_code_base_to_GitHub/Summary.md
 @../ISSUES/4_Warn_about_project_files_used_as_rules/Summary.md
-@10.4_Block_comment_the_test_suite/Summary.md
 @../ISSUES/2_Limit_directory_searches_in_large_trees/Summary.md
 @../ISSUES/3_Generate_the_AI_Contexts_Rules_file/Summary.md
 @11_Review_README.md_together/Summary.md
 @10_Do_some_additional_cleanup/Summary.md
-@10.3_Follow_the_Python_Coding_Rules/Summary.md
-@10.2_Add_a_couple_of_new_rules_and_enable_them/Summary.md
-@10.1_Rename_the_program/Summary.md
 @8_Explore_moving_items_between_collections/Summary.md
 @../ISSUES/1_Per_collection_state_sets/Summary.md
 @7_Explore_Having_a_Rules_Collection/Summary.md

@@ -1,1 +1,6 @@
 line-length = 79
+
+[lint]
+# Also check pycodestyle errors and warnings (e.g. E501, E711), and
+# `flake8-bugbear` (B), which finds likely bugs.
+extend-select = ["B", "E", "W"]

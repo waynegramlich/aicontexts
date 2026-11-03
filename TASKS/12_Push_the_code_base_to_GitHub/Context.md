@@ -63,9 +63,9 @@
   `def`-line disable in `_test_interrupted_transfer()`, and a
   `disable-next` for the `--test` import (`import-outside-toplevel`,
   `cyclic-import`).
-* `uv tool install` also gave ruff 0.17.2, mypy 2.4.0 and flake8 7.4.1
-  (were 0.17.1, 1.9.0, 7.0.0); all four checkers are clean.  `R.pcr`
-  now has a "Checkers" section (all four, and quieting each by name).
+* `uv tool install` also gave ruff 0.17.2 and mypy 2.4.0 (were
+  0.17.1 and 1.9.0); all of the checkers are clean.  `R.pcr` now
+  has a "Checkers" section (each checker, and quieting each by name).
 * Added and activated `R.gar` (General AI Rules; was `R.gar2`, then
   `R.gr`; `rule_sources/General_AI_Rules.md`): number lists the user
   answers.

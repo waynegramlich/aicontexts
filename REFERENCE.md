@@ -1,234 +1,132 @@
 # AI Contexts Reference
 
-The details of how `ai_contexts` works, for anyone who needs more than
-`README.md` gives.  `ai_contexts -h` lists every command.
+Design notes on `ai_contexts.py`, written by Claude (an AI), mostly for
+Claude to read before changing the program.  They are terse, and they
+record what the code does not say: the decisions and why they were
+made.  `README.md` is the user's manual; `ai_contexts -h` lists the
+commands.
+
+## Collections
+
+* A collection is a directory holding `.ai_contexts.json` (its type,
+  `priority` flag and last move time).  The name's first letter gives
+  the tag prefix (`TASKS` -> `T.`), so first letters must differ.
+* `find_collections()` globs `*/.ai_contexts.json` in the current
+  directory and then each parent, stopping after a directory with
+  `.git` or `.hg` (`VERSION_CONTROL_NAMES`), which is still checked;
+  without one it goes to `/`.  Symbolic links are skipped in every
+  path component.  No clocks, budgets or skip lists: kept simple and
+  deterministic.
+* Types (`TYPES`): "items" (default) and "rules".  A type sets the
+  states, new state, finished states, `Context.md` states, commands,
+  item files and whether it is in `Startup.md`.  A collection named
+  `RULES` is "rules" on creation; otherwise `type` while empty.  A new
+  type is a new `TYPES` entry.
 
 ## Items
 
-Each Item is stored in a dedicated sub-directory (e.g. `TASKS/1.2.3_Title/`)
-with the following information:
-* Title:
-  A short one line description of the item (e.g. `Initialization Fails`.)
-* Number:
-  A unique hierarchical number (e.g. `1.2.3`) giving the Item's place in
-  the tree.  There are never gaps: if `1.3` exists, so do `1.1` and
-  `1.2`.  Items can be created or moved to the next free number of a
-  level, or `before` or `after` an existing Item, and the others are
-  renumbered to make room or close the gap.  Numbers change as Items are
-  created, deleted and moved, so they are never used in text; tags are.
-* Tag:
-  A short name: the capitalized first letter of the collection and a
-  period, then the first letter of each word of the Title in lower case,
-  ignoring "a", "an", "of" and "the" (e.g. `Division by Zero is Bad` in
-  `ISSUES/` is `I.dbzib`.)  Collections must start with different
-  letters.  A tag is unique within its collection; when it would clash,
-  the newer Item gets the lowest free number added (e.g. `I.cde2`.)  A
-  tag never changes on its own, since tags show up in commit messages and
-  the like.  Text refers to an Item by its tag, `~` and its Number when
-  the text was written (e.g. `I.dbzib~3`), never by Number alone.  The
-  `~NUMBER` is only a help in finding the Item's directory: it is never
-  updated, so it records history and may be out of date.  Commands
-  accept a tag (with or without a `~NUMBER`, which is ignored) wherever
-  they take a Number.
-* Priority:
-  An optional level: 0 (catastrophic), 1 (high), 2 (medium) or 3 (low).
-  Priority is enabled per collection (`ai_contexts i enable priority`);
-  then `ls` shows it and lists Items by priority first.
-* State:
-  The state of the item: Pending, Open, Reference, Suspended, Closed or
-  Rejected (decided against; otherwise treated like Closed).
-  New items start out Pending.  A Reference item is not being worked on,
-  but its `Context.md` is still loaded like an Open item's.  (A rule's
-  state is Active or InActive instead.)
-* `Details.md`:
-  A file edited by a human that textually describes the item.  Its first
-  line is a heading with the Number and Title (e.g. `# 1.2.3 Title`.)
-* `Context.md`:
-  A file managed by an AI LLM that has additional AI context information.
-* `Summary.md`:
-  A short summary of what the Item settled, written by the AI LLM before the
-  Item is closed.  Its first line (``# Summary of `T.fbm` Title``) is kept up
-  to date by `ai_contexts`.
-* `.item.json`:
-  A hidden file managed by `ai_contexts` that holds the State, Tag, Priority,
-  the created and updated times (in UTC), and a history of every State
-  change, and of every transfer to another collection; for a rule, also
-  its Title, its source, the SHA-256 of its copy (its `Details.md`) and
-  when the copy was refreshed.
+* Directory `NUMBER_Title_Words/` with `Details.md` (heading `# NUMBER
+  Title`, kept by `ai_contexts`), `Context.md`, `Summary.md` (heading
+  ``# Summary of `TAG` Title``, kept) and `.item.json` (state, tag,
+  priority, UTC `created`/`updated`, state `history`, transfer `moves`;
+  for a rule also title, source, SHA-256 and `refreshed`).
+* Every load runs `check_items()` (about 0.2 s per 2000 items, so no
+  "check every N hours"): it fixes what `ai_contexts` keeps and reports
+  what a person keeps (a missing heading, a title that no longer
+  matches its directory, a shared tag), with the fixing command.
 
-<!-- Let's mostly focus on the stuff above. -->
+## Numbers
 
-Every time `ai_contexts` runs, it rewrites `TASKS/Startup.md`.  It contains
-only Claude Code `@` imports: one for the `Details.md` of every Item that is
-not Closed, plus one for the `Context.md` of every Open or Reference Item, for
-every collection (e.g. `@../ISSUES/1_Crash/Details.md`).  Then come the
-`Summary.md` files of the 50 most recently closed Items, newest first (their
-`Details.md` if the summary is still empty), and finally, if there are older
-closed Items, `TASKS/Closed.md`, which `ai_contexts` writes to list them by
-tag and title only.  (The test suite changes the 50 with
-`AI_CONTEXTS_TEST_CLOSED_SUMMARIES`.)  Adding `@TASKS/Startup.md` to
-`CLAUDE.md` loads them at the start of each AI session.  Rules are not in
-`TASKS/Startup.md` (see "Rules Collections".)
+* Hierarchical, never with gaps (hand-made gaps are renumbered on
+  load).  Places: next free number, `before N`, `after N`.
+* Renumbering writes its plan and phase to `.renumber.json`; an
+  interrupted one is finished on the next load.
+* No undo (built once, then removed): version control is the undo.  A
+  move, rename or transfer over an hour after the last
+  (`MOVE_RENAME_DELAY_SECONDS`) recommends a snapshot and asks.
 
-There is no undo; use a version control system.  Before a move, rename or
-transfer, if the collection has had none for over an hour (the time is kept in
-its `.ai_contexts.json`), `ai_contexts` recommends taking a snapshot first
-(e.g. `git commit`) and asks whether to continue.  The test suite shortens the
-hour with the `AI_CONTEXTS_TEST_MOVE_RENAME_DELAY_SECONDS` environment
-variable.
+## Tags
 
-A tag can stand in for its collection: `ai_contexts I.dbzib close` is the same
-as `ai_contexts ISSUES close I.dbzib`.  `ai_contexts t show T.fbm` (or
-`ai_contexts T.fbm show`) shows everything about an Item: its number, tag,
-state, priority, times, state history, directory and `Details.md`.  When a
-rename changes a tag, `ai_contexts` lists the writable `.md` files that
-use the old tag and offers to update them.  Only the collections (all the
-way down) and the `.md` files directly in the directory that holds them
-are searched, so a big project tree is never walked; a `grep` command is
-suggested for anywhere else.  Hidden directories, the generated
-`AI_Contexts_Rules.md` copies and anything reached through a symbolic
-link are skipped, and the files are always searched in sorted order.
+* First letter of each title word, lower case, skipping a/an/of/the.
+  Unique per collection and stable, since they appear in commit
+  messages: on a clash the newer item gets the lowest free number
+  (`cde2`).
+* Text writes `TAG~NUMBER`; the `~NUMBER` is never updated (it is
+  history) and commands ignore it.  Tags are never abbreviated.
+* A rename or transfer that changes tags offers to update the `.md`
+  files using the old ones (`update_references()`), in one pass.
+  `tag_references()` searches only the collections and the `.md` files
+  beside them, skipping hidden directories, links and the
+  `AI_Contexts_Rules.md` copies, in sorted order; it prints a `grep`
+  hint for anywhere else.  Old tags are never looked up.
 
-The collections are found in the current directory, or else the nearest
-parent directory that has any.  The search stops at a version control
-root (a directory with `.git` or `.hg`), still checking that directory
-itself, so it never finds the collections of an enclosing project;
-without one, it goes all the way to `/`.  A collection that is a
-symbolic link is skipped.
+## States and Startup
 
-An Item that belongs in another collection (e.g. a Task that turns out to
-be an Issue) is moved there, with its children, by `ai_contexts t transfer
-T.fbm issues [PLACE]`.  The PLACE is as for `move` (by default the next
-free top-level number), and both collections are renumbered to leave no
-gaps.  The tag gets the new collection's prefix (`T.fbm` becomes `I.fbm`),
-and keeps the rest unless that is taken there (then it gets the lowest
-free number, as for `create`); a transfer back gets the old tag back if it
-is free.  The title, state and its history, priority and files are kept,
-and the transfer is recorded in `.item.json` and shown by `show`.  Old
-tags are not looked up, but, as for a rename, `ai_contexts` offers to
-update every `.md` file that uses them, in one pass; this drops an old
-tag's `~NUMBER` (`T.fbm~12` becomes `I.fbm`), since that number was in
-the other collection.  Items can only be
-transferred between collections of the same type.
+* Items: Pending (new), Open, Reference, Suspended, Closed, Rejected.
+  Finished (`FINISHED_STATES`): Closed and Rejected, hidden by `ls`
+  unless `-a`.  `Context.md` is loaded while Open or Reference.
+* `write_startup()` writes `TASKS/Startup.md`, `@` imports only: the
+  `Details.md` of unfinished items, `Context.md` per above, then the
+  `Summary.md` (or `Details.md` if empty) of the `CLOSED_SUMMARIES`
+  (50) most recently finished, newest first; older ones go in
+  `TASKS/Closed.md` by tag and title.  A finished child is included
+  only while its parent is Reference (`SUMMARY_PARENT_STATES`);
+  otherwise the parent speaks for it and it is left out entirely.
+* `ls -l` sizes come from `startup_sizes()`, which uses the same
+  `startup_files()`, so they always match what is loaded.
+* Generated files start with `GENERATED_COMMENT`; Claude Code strips
+  HTML comments from imports, so it costs no tokens.
 
-`ai_contexts t ls` leaves out Closed Items (unless asked for by number or
-tag) and says how many it left out; `ai_contexts t ls -a` lists them all.
+## Transfers
 
-A renumbering (from a create, delete or move) first writes its plan to a
-hidden `.renumber.json` in the collection, and a transfer writes its plan
-to a hidden `.transfer.json` in the collection it comes from.  If either
-is interrupted, the next `ai_contexts` command finishes it and says so.
-Every command also checks the collections it loads, so nobody has to
-remember to: it fixes what `ai_contexts` maintains (the number in the `# N
-Title` heading of `Details.md`, the heading of `Summary.md`) and reports
-what a person maintains (a missing heading, a title edited so that it no
-longer matches the directory name, two Items with the same tag), saying
-how to fix it.
+* `transfer` moves items (with children) to a collection of the same
+  type.  The tag gets the new prefix and keeps the rest unless taken; a
+  transfer back regains a free old tag.  Title, state, history,
+  priority and files are kept; `moves` records it.
+* The plan goes in `.transfer.json` in the source collection, and
+  `do_transfer()` runs four repeatable phases; every load finishes an
+  interrupted one first (`recover_transfers()`).
 
-Run `ai_contexts` with no arguments to list the collections, one line
-each, `ai_contexts -h` to list the commands, and `ai_contexts --version`
-to print the version.  `ai_contexts t ls -l` also lists the size of what
-each Item has loaded at startup: the files that `Startup.md` and
-`Active_Rules.md` import for it, added up, to at most 3 digits, where a
-`KB` is 1000 bytes.  (An Item with none loaded shows `0 B`.)  `ai_contexts
-t ls -o` lists every Item, Closed and Rejected ones too, with its size,
-largest first, and ends with a line that has their total in KB.
+## Rules
 
-Every run also writes `AI_Contexts_Rules.md`, the rules for using
-`ai_contexts` that the AI loads, into every collection.  Its text is
-built into `ai_contexts.py` (`RULES_TEXT`), so it always matches the
-program and nothing else has to be installed; a copy that differs (such
-as one edited by hand) is replaced, and one that matches is left alone.
-`CLAUDE.md` imports one copy (e.g. `@TASKS/AI_Contexts_Rules.md`).  The
-copies are skipped when a rename or transfer looks for `.md` files that
-use an old tag.  Every run also reports an `@` import in `CLAUDE.md`
-whose file does not exist (only an import that looks like a file, with a
-`/` or a `.` in its path), since `CLAUDE.md` should only import files
-that are known to exist.
+* Claude Code will not import a file outside the project without
+  approval, so each rule's `Details.md` is a read-only copy of its
+  source (kept relative to the project, directories resolved).  The
+  title lives in `.item.json`, since the copy keeps the source's
+  heading.
+* Every run refreshes the copies by SHA-256: a changed source is copied
+  (via a temporary file); a copy edited in place is kept and reported
+  (`refresh` replaces it after asking); a missing source keeps the last
+  copy.  The copies are in version control, so a shared rule's change
+  shows as a diff in every project.
+* `write_active_rules()` writes `RULES/Active_Rules.md` importing the
+  Active copies in number order.
+* `screen_sources()` (for `create`, `source` and `copy`) refuses a name
+  not ending in `.md`, a hidden or reserved name, and `CLAUDE.md` /
+  `CLAUDE.local.md`; `source_doubts()` flags a capitalized stem (e.g.
+  `README`) or an `@` import, asked about in one `[y/N]` question.
+* Every run reports a rule without a source, an Active rule without a
+  copy, an `@` import in a copy, and a copy that `CLAUDE.md` also
+  imports; such problems end with `AI_REPORTS`.
 
-## Rules Collections
+## The AI's Rules
 
-A rules collection (e.g. `RULES/`) holds rules that Claude Code should
-load at the start of every session, such as version control or coding
-rules shared by several projects.  The rule files can live anywhere in
-the file system, but Claude Code will not import a file outside the
-project (even through a symbolic link) without approval, so `ai_contexts`
-copies each rule into the project:
+* `RULES_TEXT` is written as `AI_Contexts_Rules.md` into every
+  collection on every run (only when it differs), so it always matches
+  the program.  It holds only policy; command syntax lives in `HELP`,
+  and what to answer or do lives in the prompts and messages
+  themselves, at the point of need.
+* `check_claude_imports()` reports a `CLAUDE.md` import (with a `/` or
+  `.`) of a missing file: `CLAUDE.md` imports only files known to
+  exist.
 
-    ai_contexts RULES create
-    ai_contexts r create 1 ../shared_rules/Version_Control_Rules.md \
-                           ../shared_rules/Python_Coding_Rules.md \
-                           ../shared_rules/Code_Marker_Rules.md
-    ai_contexts r activate R.vcr
+## Testing
 
-A collection's type (`items`, the default, or `rules`) is kept in its
-`.ai_contexts.json`, and sets its states and commands.  A collection
-named `RULES` (in any case) is a rules collection from the start; any
-other is made one with `ai_contexts NAME type rules` while it has no
-items.  A command of the other type (e.g. `copy` in an items
-collection) is refused with a message saying so, and how to change the
-type.
-
-`create PLACE FILE...` makes one rule from each file (or glob pattern), at
-PLACE and then after it, titled from the file name
-(`Version_Control_Rules.md` is "Version Control Rules").  Each rule
-directory holds only a `Details.md` and the `.item.json`, like a Task or
-an Issue (which also have a `Context.md` and a `Summary.md`).  A rule's
-`Details.md` is a read-only copy of its source file (e.g.
-`RULES/1_Version_Control_Rules/Details.md` for
-`../shared_rules/Version_Control_Rules.md`), so it starts with the
-source's own heading, which `ai_contexts` leaves alone; the rule's title
-is kept in `.item.json` instead.  (A rule made before this had a
-heading-only `Details.md` and a copy with the source's name; the next
-run moves it to the new layout.)  The source is kept relative to the
-directory that holds the collections, with its directories resolved to
-real ones; `ai_contexts r source R.vcr FILE` changes it.
-
-`copy DIRECTORY [CHOICES...]` copies rules from another project's rules
-collection, or from any directory of rule files.  It lists them by
-number and title: a collection's rules in number order (their
-`Details.md` files, which may be sources there and only there; the
-collection is only read, never loaded, so nothing in it changes), or a
-directory's `.md` files in name order.  Each title is the file's first
-line, if that is a `# ` heading, or else the rule's title in its
-`.item.json`, or else its name.  A rule that is already here (with the
-same source, or the same text) is marked `(have it)`, and is not copied
-again.  The CHOICES are numbers and `FROM-TO` ranges, separated by
-commas or spaces (e.g. `1,3-5` or `1 3-5`); they are asked for if they
-are not given, and an empty answer copies nothing.  The chosen rules
-are checked like `create`'s files, and created after the last rule,
-InActive, with their files as their sources (e.g.
-`../other_project/RULES/2_Python_Coding_Rules/Details.md`, which that
-project keeps up to date from its own source).  `copy` then prints the
-`activate` command that would use them all; the state commands take a
-range of siblings (e.g. `ai_contexts r activate 4-6`), like `move` and
-`delete`.
-
-Some files are not meant to be rules, and a glob like `*.md` can pick
-them up.  `create`, `copy` and `source` insist on a file whose name ends in
-`.md`, and refuse a `CLAUDE.md` (or
-`CLAUDE.local.md`) file, since Claude Code loads those by itself, and
-nothing is created.  A file named in capital letters (like `README.md`)
-is usually about the project, and a file with an `@` import of a file
-does not stand alone, so they are listed in one question; unless the
-answer is yes, they are skipped and the other files are used.
-
-A new rule is InActive; `activate` (which needs a copy) and `deactivate` change
-that.  Every time `ai_contexts` runs, it rewrites `RULES/Active_Rules.md` with
-an `@` import of the copy of every Active rule, in number order, so adding
-`@RULES/Active_Rules.md` to `CLAUDE.md` loads them.
-
-Every run also refreshes the copies.  A copy that matches its source is
-left alone; a changed source is copied again (to a temporary file that
-then replaces the copy) and its SHA-256 is recorded.  A copy whose SHA-256
-is no longer the recorded one was edited in place: it is reported and
-kept, and `ai_contexts r refresh R.vcr` replaces it after asking.  A missing
-source is reported, and the last copy is kept.  The copies are small and
-are meant to be kept in version control, so a change to a shared rule
-shows up as a diff in each project that uses it.
-
-A rule must stand alone, so every run also reports a rule with no source,
-an Active rule with no copy, an `@` import of a file in a copy (outside
-code spans and blocks, relative to the source), and a copy that is the
-same as a file that `CLAUDE.md` imports directly (the same rule loaded
-twice).
+* `ai_contexts_test.py` (`aic --test`); every change gets tests.
+  Environment variables shorten things for it:
+  `AI_CONTEXTS_TEST_CLOSED_SUMMARIES`,
+  `AI_CONTEXTS_TEST_MOVE_RENAME_DELAY_SECONDS` and
+  `AI_CONTEXTS_TEST_RENUMBER_INTERRUPT`.
+* Windows and macOS lessons (read-only files, `\r\n`, path printing and
+  sorting, `/` globbing) are in `R.gwr`'s "What the Other Systems
+  Find".

@@ -6,7 +6,6 @@ class had `Attributes:`; `CollectionType` (frozen) and `Item` dataclasses
 lack `slots=True` and `field(...)`; 21 functions (mostly nested test
 helpers) had no docstring.
 Step 1 done: `ruff format --line-length 79` (ruff.toml already sets 79);
-`.flake8` now ignores E203, which conflicts with `ruff format` slices.
 Step 2 done: `CollectionType` is `frozen=True, slots=True` and `Item` is
 `slots=True`, with every field an explicit `field(init=True...)` under
 `# Constructor arguments:` (all of their fields are constructor

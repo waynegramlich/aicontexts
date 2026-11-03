@@ -21,10 +21,12 @@ from typing import TypeAlias
 from unittest import mock
 
 from ai_contexts import (
+    AI_REPORTS,
     CLOSED_SUMMARIES,
     COLLECTION_FILE,
     DELAY_VARIABLE,
     FORMAT_VERSION,
+    GENERATED_COMMENT,
     INTERRUPT_VARIABLE,
     ITEM_FILE,
     OLD_COLLECTION_FILE,
@@ -61,6 +63,7 @@ from ai_contexts import (
     sha256_of,
     size_text,
     source_name_error,
+    startup_sizes,
     tag_prefix,
     tag_references,
     unique_tag,
@@ -69,6 +72,9 @@ from ai_contexts import (
     write_item,
     write_startup,
 )
+
+# The first line of every generated Markdown file.
+HEADER: str = f"{GENERATED_COMMENT}\n"
 
 # A test check: called with a condition that should be true and a
 # description.
@@ -115,6 +121,7 @@ def test() -> int:
         _test_recovery(check, root / "recovery")
         _test_references(check, root / "references")
         _test_closed(check, root / "closed")
+        _test_closed_children(check, root / "closed_children")
         _test_checks(check, root / "checks")
         _test_write_failures(check, root / "failures")
         _test_errors(check, root / "errors")
@@ -574,7 +581,8 @@ def _test_list_and_state(check: Check, items: Items, directory: Path) -> None:
     check(write_startup([issues, items]) == "", "write Startup.md")
     check(
         read_file(directory / "Startup.md")
-        == "@1_Top_item/Details.md\n@1_Top_item/Context.md\n"
+        == HEADER
+        + "@1_Top_item/Details.md\n@1_Top_item/Context.md\n"
         "@1.1_Fix_the_bug_now/Details.md\n"
         "@1.1.1_Item_1.1.1/Details.md\n"
         "@1.1.2_Item_1.1.2/Details.md\n"
@@ -1278,7 +1286,7 @@ def _test_references(check: Check, directory: Path) -> None:
         "  TASKS/2_Other_Work/Context.md\n  notes.md\n"
         "Not updated; T.fbm is still used"
         in output
-        and questions[-1] == "OK to update them? (y=Yes, n=No) "
+        and questions[-1].startswith("OK to update them")
         and read_file(directory / "notes.md") == text,
         "list the references to a changed tag and leave them",
     )
@@ -1341,6 +1349,68 @@ def _test_references(check: Check, directory: Path) -> None:
             in items.rename_command(["1", "to", "Good", "Fix"], refuse_writes),
             "report a reference that can not be updated",
         )
+
+
+# Function `_test_closed_children()`:
+def _test_closed_children(check: Check, directory: Path) -> None:
+    """Test which Closed children are summarized in `Startup.md`.
+
+    Arguments:
+    * `check` (`Check`):
+      Records a check: a condition that should be true and its
+      description.
+    * `directory` (`Path`):
+      The directory to test in.
+    """
+    # Make a parent with a Closed and a Rejected child, and a Closed
+    # grandchild under the Closed child.
+    directory.mkdir()
+    tasks: Items = Items(directory / "TASKS")
+    number: str
+    title: str
+    for number, title in (
+        ("1", "Parent"),
+        ("1.1", "Child"),
+        ("1.1.1", "Grandchild"),
+        ("1.2", "Rejected Child"),
+    ):
+        tasks.create_item(number, title)
+    tasks.set_state((1, 1, 1), "Closed")
+    tasks.set_state((1, 1), "Closed")
+    tasks.set_state((1, 2), "Rejected")
+    startup: Path = directory / "TASKS" / "Startup.md"
+
+    # A parent in every state but Reference leaves its finished
+    # children out, even from `Closed.md`.
+    state: str
+    for state in ("Pending", "Open", "Suspended", "Closed", "Rejected"):
+        tasks.set_state((1,), state)
+        check(
+            write_startup([tasks]) == ""
+            and "1.1_" not in read_file(startup)
+            and "1.2_" not in read_file(startup)
+            and not (directory / "TASKS" / "Closed.md").exists(),
+            f"a {state} parent leaves out its finished children",
+        )
+
+    # A Reference parent has them summarized, but not the grandchild,
+    # whose own parent is Closed.
+    tasks.set_state((1,), "Reference")
+    write_startup([tasks])
+    check(
+        "@1.1_Child/Details.md" in read_file(startup)
+        and "@1.2_Rejected_Child/Details.md" in read_file(startup)
+        and "1.1.1_" not in read_file(startup),
+        "a Reference parent has its finished children summarized",
+    )
+
+    # The sizes that `ls -l` shows agree.
+    sizes: dict[Path, int] = startup_sizes([tasks])
+    check(
+        tasks.directories[(1, 1)] in sizes
+        and tasks.directories[(1, 1, 1)] not in sizes,
+        "startup sizes leave out the children that are left out",
+    )
 
 
 # Function `_test_closed()`:
@@ -1419,7 +1489,8 @@ def _test_closed(check: Check, directory: Path) -> None:
         check(write_startup([issues, tasks]) == "", "write Closed.md")
         check(
             read_file(directory / "TASKS" / "Startup.md")
-            == "@3_Gamma/Details.md\n@1_Alpha/Summary.md\n"
+            == HEADER
+            + "@3_Gamma/Details.md\n@1_Alpha/Summary.md\n"
             "@../ISSUES/1_Crash/Summary.md\n@2_Beta/Details.md\n"
             "@Closed.md\n",
             "Startup.md has the newest summaries, then Closed.md",
@@ -2084,7 +2155,8 @@ def _test_commands(check: Check, directory: Path) -> None:
         # Check that `Startup.md` covers every collection.
         check(
             read_file(Path("TASKS/Startup.md"))
-            == "@1_An_item/Details.md\n@1_An_item/Context.md\n"
+            == HEADER
+            + "@1_An_item/Details.md\n@1_An_item/Context.md\n"
             "@1.1_New_child/Details.md\n@1.1_New_child/Context.md\n"
             "@../Issues/1_Crash/Details.md\n"
             "@../Issues/1_Crash/Context.md\n",
@@ -2418,7 +2490,7 @@ def _test_types(check: Check, directory: Path) -> None:
         )
         check(
             read_file(directory / "TASKS" / "Startup.md")
-            == "@1_A_task/Details.md\n@1_A_task/Context.md\n",
+            == HEADER + "@1_A_task/Details.md\n@1_A_task/Context.md\n",
             "rules are not in Startup.md",
         )
 
@@ -2605,7 +2677,8 @@ def _test_rule_copy(check: Check, directory: Path) -> None:
         check(
             code == 0
             and read_file(rules / "Active_Rules.md")
-            == "@1_Alpha_Rules/Details.md\n@2_Delta_Rules/Details.md\n",
+            == HEADER
+            + "@1_Alpha_Rules/Details.md\n@2_Delta_Rules/Details.md\n",
             "activate a range of rules",
         )
 
@@ -2854,16 +2927,16 @@ def _test_rules(check: Check, directory: Path) -> None:
         )
 
         # Check activating rules.
-        check(read_file(active) == "", "no Active rules")
+        check(read_file(active) == HEADER, "no Active rules")
         check(
             run("r", "act", "2")[0] == 0
-            and read_file(active) == "@2_Alpha_Rule/Details.md\n",
+            and read_file(active) == HEADER + "@2_Alpha_Rule/Details.md\n",
             "Active_Rules.md imports the Active rules",
         )
         check(
             run("r", "act", "-r", "1")[0] == 0
             and read_file(active)
-            == "@1_Link_Rule/Details.md\n@2_Alpha_Rule/Details.md\n",
+            == HEADER + "@1_Link_Rule/Details.md\n@2_Alpha_Rule/Details.md\n",
             "Active_Rules.md is in number order",
         )
 
@@ -2888,6 +2961,7 @@ def _test_rules(check: Check, directory: Path) -> None:
         check(
             "Refreshed R.ar from '../shared/Alpha_Rule.md'" in text
             and "Refreshed R.lr from '../shared/Link_Rule.md'" in text
+            and AI_REPORTS not in text
             and "twice" in read_file(copy),
             "a changed source is copied again",
         )
@@ -2979,7 +3053,7 @@ def _test_rules(check: Check, directory: Path) -> None:
             sorted(path.name for path in (rules / "1_Link_Rule").iterdir())
             == [ITEM_FILE, "Details.md"]
             and read_file(active)
-            == "@1_Link_Rule/Details.md\n@2_Alpha_Rule/Details.md\n",
+            == HEADER + "@1_Link_Rule/Details.md\n@2_Alpha_Rule/Details.md\n",
             "a new source replaces the old copy",
         )
 
@@ -3013,7 +3087,9 @@ def _test_rules(check: Check, directory: Path) -> None:
         code, text = run("r", "ls")
         check(
             "R.lr: its source '../shared/Beta_Rule.md' is missing; its last "
-            "copy is kept" in text,
+            "copy is kept"
+            in text
+            and AI_REPORTS in text,
             "a missing source keeps its copy",
         )
 
@@ -3023,7 +3099,8 @@ def _test_rules(check: Check, directory: Path) -> None:
         check(
             "R.lr: its source '../shared/Beta_Rule.md' is missing\n" in text
             and "R.lr is Active but has no copy of its source" in text
-            and read_file(active) == "@2_Alpha_Rule/Details.md\n",
+            and AI_REPORTS in text
+            and read_file(active) == HEADER + "@2_Alpha_Rule/Details.md\n",
             "an Active rule without a copy",
         )
         check(run("r", "refresh", "1")[0] == 1, "refresh a missing source")
@@ -3248,7 +3325,7 @@ def _test_list_sizes(check: Check, directory: Path) -> None:
             imported: int = sum(
                 (tasks / line[1:]).stat().st_size
                 for line in read_file(tasks / "Startup.md").splitlines()
-                if line != "@Closed.md"
+                if line.startswith("@") and line != "@Closed.md"
             )
             check(
                 imported == 500 + pending_size + closed_size,
@@ -4223,6 +4300,7 @@ def _test_rules_files(check: Check, directory: Path) -> None:
             and "CLAUDE.md imports @Missing.md (line 2), which does not exist"
             in text
             and "CLAUDE.md imports @Gone/ (line 5)" in text
+            and text.count(AI_REPORTS) == 1
             and RULES_FILE not in text
             and "dataclass" not in text
             and "Code.md" not in text,

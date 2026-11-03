@@ -1,0 +1,16 @@
+{
+  "state": "Closed",
+  "created": "2026-11-03T17:14:04Z",
+  "updated": "2026-11-03T17:14:12Z",
+  "history": [
+    {
+      "state": "Pending",
+      "time": "2026-11-03T17:14:04Z"
+    },
+    {
+      "state": "Closed",
+      "time": "2026-11-03T17:14:12Z"
+    }
+  ],
+  "tag": "ssc"
+}
