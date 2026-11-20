@@ -1,16 +1,20 @@
 {
-  "state": "InActive",
+  "state": "Active",
   "created": "2026-11-19T17:59:10Z",
-  "updated": "2026-11-19T17:59:10Z",
+  "updated": "2026-11-20T18:29:23Z",
   "history": [
     {
       "state": "InActive",
       "time": "2026-11-19T17:59:10Z"
+    },
+    {
+      "state": "Active",
+      "time": "2026-11-20T18:29:23Z"
     }
   ],
   "tag": "csr",
   "title": "Claude Session Rules",
   "source": "Claude_Session_Rules.md",
-  "sha256": "ac46339855006239fb007824651926ebe81e9eb988ee9bcddcb18107638eab1c",
-  "refreshed": "2026-11-19T17:59:10Z"
+  "sha256": "735549d255c4c8498f26bb0289aba490f409b7cb816527f87239daccaef772ce",
+  "refreshed": "2026-11-20T18:46:14Z"
 }
