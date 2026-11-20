@@ -1,6 +1,5 @@
 <!-- Written by ai_contexts; do not edit. -->
-@14_Release_version_0.2.0/Details.md
-@14_Release_version_0.2.0/Context.md
+@14_Release_version_0.2.0/Summary.md
 @13_Shrink_the_startup_context/Summary.md
 @12_Push_the_code_base_to_GitHub/Summary.md
 @../ISSUES/4_Warn_about_project_files_used_as_rules/Summary.md

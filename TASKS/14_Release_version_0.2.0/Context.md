@@ -35,3 +35,15 @@ release since 0.1.0 on 2026-10-26, tag `v0.1.0` on e5e2541).
 * #12: `_test_interrupted_transfer()` now takes one `Transfer` tuple
   instead of four keyword arguments; no `too-many-arguments`
   suppressions remain in the code.
+* release.yml 44828776193 (testpypi, adc3cc3) passed 23/23 (+1
+  skipped).  release.yml 44829434482 (testpypi, c3d500d, uploaded
+  `0.2.0.dev202611202230`) passed 23/23 (+1 skipped).
+* Tag `v0.2.0` (annotated) on c3d500d, pushed; GitHub reported the
+  admin bypass of the tag ruleset, as expected.  Next: pypi run at the
+  user's go.
+* release.yml 44830073490 (pypi, tag `v0.2.0`): uploaded 0.2.0 (wheel
+  and sdist); 2 stranger jobs (windows 3.14, macos-15-intel 3.12)
+  failed `pip install aicontexts==0.2.0` (index still showed only
+  0.1.0, after `listed` passed on the JSON API); re-run with
+  `--failed`, then 23/23 (+1 skipped).  `./release_check.py pypi
+  0.2.0` from this machine: every check passed.
