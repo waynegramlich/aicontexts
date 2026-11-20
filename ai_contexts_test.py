@@ -79,6 +79,11 @@ HEADER: str = f"{GENERATED_COMMENT}\n"
 # description.
 Check: TypeAlias = Callable[[bool, str], None]
 
+# A transfer of a TASKS item to ISSUES: the item's number, the place
+# ("", "before" or "after"), the number of the place in ISSUES, and the
+# items after the transfer.
+Transfer: TypeAlias = tuple[tuple[int, ...], str, str, list[str]]
+
 
 # Function `test()`:
 def test() -> int:
@@ -3877,11 +3882,8 @@ def _test_transfer_recovery(check: Check, directory: Path) -> None:
       The directory to test in.
     """
     # Interrupt two transfers after each of their steps.
-    name: tuple[int]
-    place: str
-    word: str
-    expected: list[str]
-    for name, place, word, expected in (
+    transfer: Transfer
+    for transfer in (
         (
             (1,),
             "before",
@@ -3912,12 +3914,7 @@ def _test_transfer_recovery(check: Check, directory: Path) -> None:
         ),
     ):
         _test_interrupted_transfer(
-            check,
-            directory / f"{name[0]}",
-            name=name,
-            place=place,
-            word=word,
-            expected=sorted(expected),
+            check, directory / f"{transfer[0][0]}", transfer
         )
 
     # The remaining checks need permissions.
@@ -3938,20 +3935,12 @@ def _test_transfer_recovery(check: Check, directory: Path) -> None:
 
 
 # Function `_test_interrupted_transfer()`:
-def _test_interrupted_transfer(  # pylint: disable=too-many-arguments
-    check: Check,
-    directory: Path,
-    *,
-    name: tuple[int, ...],
-    place: str,
-    word: str,
-    expected: list[str],
+def _test_interrupted_transfer(
+    check: Check, directory: Path, transfer: Transfer
 ) -> None:
     """Interrupt a transfer of a TASKS item after each step.
 
-    Each time, the next load must finish the transfer.  The keyword
-    arguments describe one transfer, so `pylint`'s `too-many-arguments`
-    is turned off for this function.
+    Each time, the next load must finish the transfer.
 
     Arguments:
     * `check` (`Check`):
@@ -3959,16 +3948,16 @@ def _test_interrupted_transfer(  # pylint: disable=too-many-arguments
       description.
     * `directory` (`Path`):
       The directory to test in.
-    * `name` (`tuple[int, ...]`):
-      The name of the TASKS item to transfer.
-    * `place` (`str`):
-      "", "before" or "after".
-    * `word` (`str`):
-      The number of the place in ISSUES.
-    * `expected` (`list[str]`):
-      The ISSUES items after the transfer.
+    * `transfer` (`Transfer`):
+      The transfer and the items after it.
     """
     # Transfer in a new directory for each number of steps.
+    name: tuple[int, ...]
+    place: str
+    word: str
+    expected: list[str]
+    name, place, word, expected = transfer
+    expected = sorted(expected)
     directory.mkdir()
     limit: int
     for limit in range(100):

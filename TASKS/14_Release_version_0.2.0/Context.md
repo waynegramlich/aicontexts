@@ -29,3 +29,9 @@ release since 0.1.0 on 2026-10-26, tag `v0.1.0` on e5e2541).
 * `release_check.py source` failed locally (all Pythons): it expected
   `Active_Rules.md` without the `GENERATED_COMMENT` line that `T.ssc`
   (42f7962) added.  Fixed; 3.11 to 3.15 all pass.
+* release.yml 44828776193 (testpypi, adc3cc3): build passed with the
+  newest linters; approved by Claude.  Superseded by #12's commit,
+  which needs its own rehearsal before the tag.
+* #12: `_test_interrupted_transfer()` now takes one `Transfer` tuple
+  instead of four keyword arguments; no `too-many-arguments`
+  suppressions remain in the code.
