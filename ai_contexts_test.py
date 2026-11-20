@@ -55,7 +55,6 @@ from ai_contexts import (
     parse_choices,
     parse_number,
     parse_priority,
-    print_items,
     read_file,
     read_item,
     remove_file,
@@ -126,6 +125,7 @@ def test() -> int:
         _test_write_failures(check, root / "failures")
         _test_errors(check, root / "errors")
         _test_portability(check, root / "portability")
+        _test_show(check, root / "show")
 
     # The commands search upward for collections, so they are tested
     # away from the collections made by the other tests.
@@ -247,52 +247,6 @@ def _test_parsing(check: Check) -> None:
             isinstance(parse_priority(level), str),
             f"reject priority {level!r}",
         )
-
-    # Check printing items.
-    printed: list[Item] = [
-        Item((1,), "Can Dogs Eat", tag="cde", priority=0),
-        Item((1, 2), "X", "Reference", tag="x"),
-    ]
-    output: io.StringIO = io.StringIO()
-    with contextlib.redirect_stdout(output):
-        print_items(printed)
-        print_items(printed, priority=True, prefix="I.")
-    check(
-        output.getvalue() == "1    Pending    cde  Can Dogs Eat\n"
-        "1.2  Reference  x    X\n"
-        "1    Pending    0  I.cde  Can Dogs Eat\n"
-        "1.2  Reference  -  I.x    X\n",
-        "print_items shows the tag, and the priority if asked",
-    )
-
-    # Check printing sizes, which line up on the right before the title.
-    output = io.StringIO()
-    with contextlib.redirect_stdout(output):
-        print_items(printed, [1234, 5])
-    check(
-        output.getvalue() == "1    Pending    cde  1.23 KB  Can Dogs Eat\n"
-        "1.2  Reference  x        5 B  X\n",
-        "print_items shows the sizes",
-    )
-
-    # Check that the total lines up with the sizes, past any priority,
-    # and that a wider total moves them over.
-    output = io.StringIO()
-    with contextlib.redirect_stdout(output):
-        print_items(printed, [1234, 5], total=True)
-        print_items(printed, [5, 5], priority=True, total=True)
-        print_items(printed[:1], [123456], total=True)
-    check(
-        output.getvalue() == "1    Pending    cde  1.23 KB  Can Dogs Eat\n"
-        "1.2  Reference  x        5 B  X\n"
-        "                     1.24 KB  Total\n"
-        "1    Pending    0  cde      5 B  Can Dogs Eat\n"
-        "1.2  Reference  -  x        5 B  X\n"
-        "                        0.01 KB  Total\n"
-        "1  Pending    cde  123 KB  Can Dogs Eat\n"
-        "                   123 KB  Total\n",
-        "print_items lines the total up with the sizes",
-    )
 
     # Check that a total is always in KB, even past 3 digits.
     size: int
@@ -3236,6 +3190,80 @@ def _test_rule_failures(
         and not (rule / "Alpha_Rule.md").exists()
         and read_item(rule)["title"] == "Alpha Rule",
         "a rule is upgraded once its title can be recorded",
+    )
+
+
+# Function `_test_show()`:
+def _test_show(check: Check, directory: Path) -> None:
+    """Test the lines that `Items.show()` prints.
+
+    Arguments:
+    * `check` (`Check`):
+      Records a check: a condition that should be true and its
+      description.
+    * `directory` (`Path`):
+      The directory to test in.
+    """
+    # Make a collection without priority and one with it.
+    directory.mkdir()
+    tasks: Items = Items(directory / "TASKS")
+    issues: Items = Items(directory / "ISSUES")
+    issues.settings["priority"] = True
+    printed: list[Item] = [
+        Item((1,), "Can Dogs Eat", tag="cde", priority=0),
+        Item((1, 2), "X", "Reference", tag="x"),
+    ]
+
+    # Check printing items.
+    output: io.StringIO = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        tasks.show(printed)
+        issues.show(printed)
+    check(
+        output.getvalue() == "1    Pending    T.cde  Can Dogs Eat\n"
+        "1.2  Reference  T.x    X\n"
+        "1    Pending    0  I.cde  Can Dogs Eat\n"
+        "1.2  Reference  -  I.x    X\n",
+        "show prints the tag, and the priority if enabled",
+    )
+
+    # Check printing sizes, which line up on the right before the title.
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        tasks.show(printed, [1234, 5])
+    check(
+        output.getvalue() == "1    Pending    T.cde  1.23 KB  Can Dogs Eat\n"
+        "1.2  Reference  T.x        5 B  X\n",
+        "show prints the sizes",
+    )
+
+    # Check that the total lines up with the sizes, past any priority,
+    # and that a wider total moves them over.
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        tasks.show(printed, [1234, 5], total=True)
+        issues.show(printed, [5, 5], total=True)
+        tasks.show(printed[:1], [123456], total=True)
+    check(
+        output.getvalue() == "1    Pending    T.cde  1.23 KB  Can Dogs Eat\n"
+        "1.2  Reference  T.x        5 B  X\n"
+        "                       1.24 KB  Total\n"
+        "1    Pending    0  I.cde      5 B  Can Dogs Eat\n"
+        "1.2  Reference  -  I.x        5 B  X\n"
+        "                          0.01 KB  Total\n"
+        "1  Pending    T.cde  123 KB  Can Dogs Eat\n"
+        "                     123 KB  Total\n",
+        "show lines the total up with the sizes",
+    )
+
+    # Check printing old numbers before the new ones.
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        tasks.show(printed, old_numbers=["2", "2.10"])
+    check(
+        output.getvalue() == "2    -> 1    Pending    T.cde  Can Dogs Eat\n"
+        "2.10 -> 1.2  Reference  T.x    X\n",
+        "show prints the old numbers",
     )
 
 

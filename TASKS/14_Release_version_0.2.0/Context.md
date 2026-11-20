@@ -16,3 +16,16 @@ release since 0.1.0 on 2026-10-26, tag `v0.1.0` on e5e2541).
   session that does a release reads
   `rule_sources/GitHub_Workflow_Rules.md` (and `GitHub_Setup_Rules.md`)
   on demand.
+* 2026-11-20: release.yml 44826584339 (testpypi) failed in `build`:
+  pylint R0913 too-many-arguments on `print_items()` (6/5), from
+  `total` added by `--ordered` (da20849).  It also failed locally; the
+  earlier "clean" check only tailed the output, and a single R message
+  still rounds to 10.00.  Check pylint's exit status, not the score.
+  Nothing was uploaded.  At the user's wish the code was fixed rather
+  than quieted: `print_items()` was merged into its only caller,
+  `Items.show()`, which takes `priority` and `prefix` from the
+  collection (5 arguments with `self`); its tests moved to
+  `_test_show()`, plus one for old numbers (634 checks).
+* `release_check.py source` failed locally (all Pythons): it expected
+  `Active_Rules.md` without the `GENERATED_COMMENT` line that `T.ssc`
+  (42f7962) added.  Fixed; 3.11 to 3.15 all pass.

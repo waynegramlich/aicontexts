@@ -315,7 +315,8 @@ def session(checker: Checker, scripts: Path) -> None:
         rule.is_file()
         and rule.read_text(encoding="utf-8") == RULE_TEXT
         and active.read_text(encoding="utf-8")
-        == "@1_Style_Rules/Details.md\n",
+        == "<!-- Written by ai_contexts; do not edit. -->\n"
+        "@1_Style_Rules/Details.md\n",
         "the Active rule's Details.md is its source, and is loaded",
         "",
     )

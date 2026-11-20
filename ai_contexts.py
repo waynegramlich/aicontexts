@@ -2001,26 +2001,71 @@ class Items:
         *,
         total: bool = False,
     ) -> None:
-        """Print items with this collection's tag prefix and priority.
+        """Print one line per item: number, state, priority, tag and title.
+
+        The tag has this collection's prefix, and the priority (with "-"
+        for none) is printed only if this collection has it enabled.
 
         Arguments:
         * `items` (`list[Item]`):
           The items to print.
         * `sizes` (`list[int] | None`):
-          If given, the bytes each item has loaded at startup.
+          If given, the bytes each item has loaded at startup, printed
+          before its title.
         * `old_numbers` (`list[str] | None`):
-          If given, the old number of each item, which is printed first.
+          If given, the old number of each item, which starts its line
+          with "->".
         * `total` (`bool`):
-          True to end with a line that has the total of the `sizes`.
+          True to end with a line that has the total of the `sizes` in
+          KB, in the column of the sizes.
         """
-        print_items(
-            items,
-            sizes,
-            self.priority_enabled,
-            self.prefix,
-            old_numbers,
-            total=total,
+        # Find the width of each column.
+        priority: bool = self.priority_enabled
+        prefix: str = self.prefix
+        old_width: int = max(
+            (len(old) for old in old_numbers or []), default=0
         )
+        width: int = max((len(item.number) for item in items), default=0)
+        tags: dict[tuple[int, ...], str] = {
+            item.name: f"{prefix}{item.tag}" if item.tag else ""
+            for item in items
+        }
+        tag_width: int = max((len(tag) for tag in tags.values()), default=0)
+        state_width: int = max(len(state) for state in ALL_STATES)
+        size_texts: list[str] = [size_text(size) for size in sizes or []]
+        total_text: str = kilobytes_text(sum(sizes or [])) if total else ""
+        size_width: int = max(
+            (len(text) for text in [*size_texts, total_text]), default=0
+        )
+
+        # Print a line for each item.
+        index: int
+        item: Item
+        for index, item in enumerate(items):
+            levels: str = (
+                f"{'-' if item.priority is None else item.priority}  "
+                if priority
+                else ""
+            )
+            size: str = f"{size_texts[index]:>{size_width}}  " if sizes else ""
+            print(
+                (
+                    f"{old_numbers[index]:<{old_width}} -> "
+                    if old_numbers
+                    else ""
+                )
+                + f"{item.number:<{width}}  "
+                f"{item.state:<{state_width}}  "
+                f"{levels}{tags[item.name]:<{tag_width}}  {size}{item.title}"
+            )
+
+        # Print the total under the sizes, past the columns before them.
+        if total:
+            indent: int = width + state_width + tag_width + 6
+            print(
+                f"{'':<{indent + (3 if priority else 0)}}"
+                f"{total_text:>{size_width}}  Total"
+            )
 
     # Method `Items.priority_enabled()`:
     @property
@@ -5970,75 +6015,6 @@ def kilobytes_text(size: int) -> str:
     * (`str`): The size (e.g. `"0.5 KB"`, `"32.1 KB"` or `"1230 KB"`).
     """
     return f"{float(f'{size / 1000.0:.3g}'):.10g} KB"
-
-
-# Function `print_items()`:
-def print_items(
-    items: list[Item],
-    sizes: list[int] | None = None,
-    priority: bool = False,
-    prefix: str = "",
-    old_numbers: list[str] | None = None,
-    *,
-    total: bool = False,
-) -> None:
-    """Print one line per item: number, state, priority, tag and title.
-
-    Arguments:
-    * `items` (`list[Item]`):
-      The items to print.
-    * `sizes` (`list[int] | None`):
-      If given, the bytes each item has loaded at startup, printed
-      before its title.
-    * `priority` (`bool`):
-      True to print the priority, with "-" for none.
-    * `prefix` (`str`):
-      The tag prefix.
-    * `old_numbers` (`list[str] | None`):
-      If given, the old number of each item, which starts its line with
-      "->".
-    * `total` (`bool`):
-      True to end with a line that has the total of the `sizes` in KB,
-      in the column of the sizes.
-    """
-    # Find the width of each column.
-    old_width: int = max((len(old) for old in old_numbers or []), default=0)
-    width: int = max((len(item.number) for item in items), default=0)
-    tags: dict[tuple[int, ...], str] = {
-        item.name: f"{prefix}{item.tag}" if item.tag else "" for item in items
-    }
-    tag_width: int = max((len(tag) for tag in tags.values()), default=0)
-    state_width: int = max(len(state) for state in ALL_STATES)
-    size_texts: list[str] = [size_text(size) for size in sizes or []]
-    total_text: str = kilobytes_text(sum(sizes or [])) if total else ""
-    size_width: int = max(
-        (len(text) for text in [*size_texts, total_text]), default=0
-    )
-
-    # Print a line for each item.
-    index: int
-    item: Item
-    for index, item in enumerate(items):
-        levels: str = (
-            f"{'-' if item.priority is None else item.priority}  "
-            if priority
-            else ""
-        )
-        size: str = f"{size_texts[index]:>{size_width}}  " if sizes else ""
-        print(
-            (f"{old_numbers[index]:<{old_width}} -> " if old_numbers else "")
-            + f"{item.number:<{width}}  "
-            f"{item.state:<{state_width}}  "
-            f"{levels}{tags[item.name]:<{tag_width}}  {size}{item.title}"
-        )
-
-    # Print the total under the sizes, past the columns before them.
-    if total:
-        indent: int = width + state_width + tag_width + 6
-        print(
-            f"{'':<{indent + (3 if priority else 0)}}"
-            f"{total_text:>{size_width}}  Total"
-        )
 
 
 # Function `main()`:
