@@ -381,7 +381,7 @@ OLD_COLLECTION_FILE: str = ".tracker.json"
 
 # The version of ai_contexts itself (the format of its collections is
 # `FORMAT_VERSION`).
-__version__: str = "0.1.0"
+__version__: str = "0.2.0"
 
 # The version of the format of the collections, kept in
 # `.ai_contexts.json`.
