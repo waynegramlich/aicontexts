@@ -15,6 +15,16 @@ The Claude Code Session rules are:
   do not get reused.  When asked for a prioritized issue list, just list the
   issues from most important to least important without prefixing by priority
   number.  A common request is to ask for the top N issues (e.g. 5).
-* Save a session transcript in `~/.claude_transcriptions/` using the start
-  time and the project's name, as `YYYY-MM-DD_HH:MM_PROJECT.md`.  After
-  each git commit, update the current transcript content.
+* Every session has a transcript in `~/.claude_transcripts/`, named
+  by the session's start time and the project's name, as
+  `YYYY-MM-DD_HH:MM_PROJECT.md`.  Claude writes it (and rewrites it,
+  to the same name) by running, from the project:
+  `python3 ~/public_html/projects/aicontexts/transcripts/session_transcript.py`,
+  which prints its path.  The scripts are kept in `aicontexts`'s
+  `transcripts/`; only the transcripts go in `~/.claude_transcripts/`.
+* Claude's first tool call of every session, before anything else
+  and whatever the user's first message asks, is that command; the
+  first reply gives the transcript's path.
+* Claude runs it again whenever the user's message contains `git
+  commit`, after each commit, and before each `/clear`, and gives the
+  path each time.
